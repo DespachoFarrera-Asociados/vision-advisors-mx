@@ -9,11 +9,25 @@ const auth0ClientId = "2ugfLDMQWdghmyfw9Ml0g0UG4uVBRC7Y";
 const connection = "clientes-vision-advisors";
 
 type PortalState = "loading" | "anonymous" | "authenticated" | "error";
+type PortalData = {
+  status: "unassigned" | "preparing" | "ready" | "unavailable";
+  message?: string;
+  organization?: { legalName: string; tradeName: string };
+  period?: { year: number; month: number; publishedAt: string | null };
+  snapshot?: {
+    healthLabel: string;
+    incomeMonthCents: number;
+    deductionsMonthCents: number;
+    estimatedResultCents: number;
+    executiveSummary: string;
+  } | null;
+};
 
 export default function ClientPortal() {
   const authRef = useRef<Auth0Client | null>(null);
   const [state, setState] = useState<PortalState>("loading");
   const [user, setUser] = useState<User | undefined>();
+  const [portalData, setPortalData] = useState<PortalData>();
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -43,6 +57,13 @@ export default function ClientPortal() {
         if (!active) return;
         if (authenticated) {
           setUser(await client.getUser());
+          const accessToken = await client.getTokenSilently();
+          const portalResponse = await fetch("/api/portal/summary", {
+            headers: { authorization: `Bearer ${accessToken}` },
+          });
+          if (portalResponse.ok || portalResponse.status === 503) {
+            setPortalData((await portalResponse.json()) as PortalData);
+          }
           setState("authenticated");
         } else {
           setState("anonymous");
@@ -105,13 +126,20 @@ export default function ClientPortal() {
   }
 
   const displayName = user?.name || user?.nickname || user?.email || "Cliente";
+  const isReady = portalData?.status === "ready" && portalData.snapshot;
+  const portalMessage = portalData?.message || "El despacho está validando la asignación segura de su expediente.";
+  const companyName = portalData?.organization?.tradeName || portalData?.organization?.legalName;
   return <main className="secure-shell">
     <aside className="secure-sidebar"><Brand/><nav><a className="active" href="#resumen">Resumen</a><a href="#proximamente">Fiscal y contable</a><a href="#proximamente">Documentos</a><a href="#proximamente">Historial</a></nav><button onClick={signOut}>Cerrar sesión</button></aside>
     <section className="secure-workspace">
       <header><div><small>SESIÓN PROTEGIDA</small><b>{displayName}</b></div><span>{displayName.slice(0, 2).toUpperCase()}</span></header>
-      <div className="secure-content" id="resumen"><p className="auth-kicker">PORTAL VISION</p><h1>Bienvenido a su espacio privado.</h1><p>Su acceso fue validado correctamente. La información fiscal y financiera se habilitará cuando el despacho concluya la asignación segura de su expediente.</p><section className="secure-status"><div><small>ESTADO DE ACCESO</small><b>Cuenta activa</b><span>Autenticación completada</span></div><div><small>EXPEDIENTE</small><b>En preparación</b><span>Sin información financiera publicada</span></div><div><small>PRÓXIMO PASO</small><b>Asignación del despacho</b><span>Validación interna de permisos</span></div></section><article className="secure-notice" id="proximamente"><i>✓</i><div><h2>Acceso habilitado de forma segura</h2><p>Este portal todavía no contiene datos fiscales reales. Vision Advisors notificará al cliente cuando su primer análisis mensual esté disponible.</p></div></article><a className="demo-link" href="/portal-demo">Ver demostración con datos ficticios →</a></div>
+      <div className="secure-content" id="resumen"><p className="auth-kicker">PORTAL VISION</p><h1>{companyName ? `Información de ${companyName}.` : "Bienvenido a su espacio privado."}</h1><p>{isReady ? portalData.snapshot?.executiveSummary : portalMessage}</p><section className="secure-status"><div><small>ESTADO DE ACCESO</small><b>Cuenta activa</b><span>Autenticación completada</span></div><div><small>{isReady ? "INGRESOS DEL MES" : "EXPEDIENTE"}</small><b>{isReady ? formatMoney(portalData.snapshot!.incomeMonthCents) : "En preparación"}</b><span>{isReady ? "Información del periodo publicado" : "Sin información financiera publicada"}</span></div><div><small>{isReady ? "RESULTADO ESTIMADO" : "PRÓXIMO PASO"}</small><b>{isReady ? formatMoney(portalData.snapshot!.estimatedResultCents) : "Asignación del despacho"}</b><span>{isReady ? `${portalData.period?.month}/${portalData.period?.year}` : "Validación interna de permisos"}</span></div></section><article className="secure-notice" id="proximamente"><i>✓</i><div><h2>{isReady ? "Información mensual publicada" : "Acceso habilitado de forma segura"}</h2><p>{isReady ? `Deducciones del mes: ${formatMoney(portalData.snapshot!.deductionsMonthCents)}.` : "Vision Advisors notificará al cliente cuando su primer análisis mensual esté disponible."}</p></div></article>{!isReady && <a className="demo-link" href="/portal-demo">Ver demostración con datos ficticios →</a>}</div>
     </section>
   </main>;
+}
+
+function formatMoney(cents: number) {
+  return new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(cents / 100);
 }
 
 function Brand() {
