@@ -122,7 +122,7 @@ export default function Home() {
         <a href="#actualidad" onClick={() => setMenu(false)}>Actualidad</a>
         <a href="#proyectos" onClick={() => setMenu(false)}>Proyectos</a>
         <a href="#socio" onClick={() => setMenu(false)}>Quiénes somos</a>
-        <button className="portal-link" onClick={() => { setMenu(false); setWindowContent({ eyebrow: "Portal Vision", title: "Un espacio privado para cada cliente", intro: "Aquí podrá consultar el resumen mensual, indicadores, reportes y documentos preparados por el despacho.", body: ["El portal se encuentra en su fase de arquitectura y seguridad. Su acceso se habilitará únicamente cuando la autenticación, los permisos y la protección de datos hayan sido validados.", "La demostración utiliza datos completamente ficticios y no almacena información fiscal o financiera real."], meta: "Prototipo disponible · Datos ficticios", action: "Ver demostración", actionHref: "/portal-demo" }); }}>Iniciar sesión <span>↗</span></button>
+        <a className="portal-link" href="/portal" onClick={() => setMenu(false)}>Iniciar sesión <span>↗</span></a>
       </div>
       <button className="menu" onClick={() => setMenu(!menu)} aria-label="Abrir menú" aria-expanded={menu}><i/><i/></button>
     </nav>
