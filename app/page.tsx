@@ -9,6 +9,7 @@ type WindowContent = {
   body: string[];
   meta?: string;
   action?: string;
+  actionHref?: string;
 };
 
 const services = [
@@ -121,7 +122,7 @@ export default function Home() {
         <a href="#actualidad" onClick={() => setMenu(false)}>Actualidad</a>
         <a href="#proyectos" onClick={() => setMenu(false)}>Proyectos</a>
         <a href="#socio" onClick={() => setMenu(false)}>Quiénes somos</a>
-        <button className="portal-link" onClick={() => { setMenu(false); setWindowContent({ eyebrow: "Portal Vision", title: "Un espacio privado para cada cliente", intro: "Aquí podrá consultar el resumen mensual, indicadores, reportes y documentos preparados por el despacho.", body: ["El portal se encuentra en su fase de arquitectura y seguridad. Su acceso se habilitará únicamente cuando la autenticación, los permisos y la protección de datos hayan sido validados.", "Ninguna información fiscal o financiera real se almacenará durante esta primera fase pública."], meta: "Próximamente · Acceso seguro" }); }}>Iniciar sesión <span>↗</span></button>
+        <button className="portal-link" onClick={() => { setMenu(false); setWindowContent({ eyebrow: "Portal Vision", title: "Un espacio privado para cada cliente", intro: "Aquí podrá consultar el resumen mensual, indicadores, reportes y documentos preparados por el despacho.", body: ["El portal se encuentra en su fase de arquitectura y seguridad. Su acceso se habilitará únicamente cuando la autenticación, los permisos y la protección de datos hayan sido validados.", "La demostración utiliza datos completamente ficticios y no almacena información fiscal o financiera real."], meta: "Prototipo disponible · Datos ficticios", action: "Ver demostración", actionHref: "/portal-demo" }); }}>Iniciar sesión <span>↗</span></button>
       </div>
       <button className="menu" onClick={() => setMenu(!menu)} aria-label="Abrir menú" aria-expanded={menu}><i/><i/></button>
     </nav>
@@ -296,7 +297,7 @@ export default function Home() {
           <p className="window-lead">{windowContent.intro}</p>
           <div className="window-body-copy">{windowContent.body.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}</div>
           {windowContent.meta && <div className="detail-meta">{windowContent.meta}</div>}
-          {windowContent.action && <a className="button primary" href="#contacto" onClick={() => setWindowContent(null)}>{windowContent.action}<span>↗</span></a>}
+          {windowContent.action && <a className="button primary" href={windowContent.actionHref || "#contacto"} onClick={() => setWindowContent(null)}>{windowContent.action}<span>↗</span></a>}
         </div>
       </section>
     </div>}
