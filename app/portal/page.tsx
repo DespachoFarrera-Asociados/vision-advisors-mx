@@ -25,7 +25,7 @@ export default function ClientPortal() {
         const client = new Auth0Client({
           domain: auth0Domain,
           clientId: auth0ClientId,
-          authorizationParams: { redirect_uri: redirectUri, ui_locales: "es-MX" },
+          authorizationParams: { redirect_uri: redirectUri, ui_locales: "es-MX es" },
           cacheLocation: "memory",
           useRefreshTokens: false,
         });
@@ -65,7 +65,7 @@ export default function ClientPortal() {
         authorizationParams: {
           redirect_uri: `${window.location.origin}/portal`,
           connection,
-          ui_locales: "es-MX",
+          ui_locales: "es-MX es",
         },
       });
     } catch (cause) {
