@@ -23,6 +23,7 @@ button, input, select, a { font:inherit; }
 .admin-content>h1 { margin:18px 0; font:clamp(48px,6vw,88px)/.95 Georgia,serif; letter-spacing:-.04em; }
 .admin-lead { max-width:830px; font-size:19px; line-height:1.65; color:var(--admin-muted); }
 .admin-message { margin:28px 0 0; padding:14px 18px; border-left:4px solid var(--admin-yellow); background:#161913; color:white; }
+.editor-feedback { margin-top:14px; padding:13px 16px; border-left:4px solid var(--admin-yellow); background:#161913; color:#fff; font-size:13px; }
 .admin-grid { margin-top:52px; display:grid; grid-template-columns:minmax(0,1.6fr) minmax(320px,.8fr); gap:22px; align-items:start; }
 .admin-panel,.admin-period { border:1px solid #d4d6ce; border-radius:20px; background:var(--admin-card); }
 .admin-panel { padding:28px; }

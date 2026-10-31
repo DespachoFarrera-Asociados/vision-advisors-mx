@@ -256,14 +256,14 @@ export default function AdminPortal() {
         <section className="period-editor" id="captura">
           <div className="editor-heading"><div><small>ANÁLISIS MENSUAL</small><h2>Preparar información del cliente</h2><p>Guarde primero para revisión. La publicación requiere una confirmación independiente.</p></div><div className="editor-selectors"><label>Empresa<select value={selectedOrganization} onChange={(event) => setSelectedOrganization(event.target.value)}>{organizations.map((organization) => <option key={organization.id} value={organization.id}>{organization.tradeName}</option>)}</select></label><label>Periodo<select value={selectedPeriod} onChange={(event) => setSelectedPeriod(event.target.value)}><option value="">Seleccione…</option>{periods.map((period) => <option key={period.id} value={period.id}>{months[period.month - 1]} {period.year} · {statusLabel(period.status)}</option>)}</select></label></div></div>
           {!selectedPeriod && <p className="editor-empty">Abra o seleccione un periodo para comenzar la captura.</p>}
-          {selectedPeriod && periodDetail && <PeriodForm key={`${periodDetail.period.id}-${periodDetail.period.updatedAt}`} detail={periodDetail} busy={busy} onSubmit={savePeriod} onPublish={publishPeriod}/>}
+          {selectedPeriod && periodDetail && <PeriodForm key={`${periodDetail.period.id}-${periodDetail.period.updatedAt}`} detail={periodDetail} busy={busy} message={message} onSubmit={savePeriod} onPublish={publishPeriod}/>}
         </section>
       </div>
     </section>
   </main>;
 }
 
-function PeriodForm({ detail, busy, onSubmit, onPublish }: { detail: PeriodDetail; busy: boolean; onSubmit: (event: FormEvent<HTMLFormElement>) => void; onPublish: () => void }) {
+function PeriodForm({ detail, busy, message, onSubmit, onPublish }: { detail: PeriodDetail; busy: boolean; message: string; onSubmit: (event: FormEvent<HTMLFormElement>) => void; onPublish: () => void }) {
   const snapshot = detail.snapshot;
   const amount = (cents?: number) => cents ? (cents / 100).toFixed(2) : "0.00";
   const tax = (type: string) => amount(detail.taxes.find((item) => item.taxType === type)?.amountCents);
@@ -275,6 +275,7 @@ function PeriodForm({ detail, busy, onSubmit, onPublish }: { detail: PeriodDetai
     <fieldset disabled={busy || locked}><legend>Impuestos y contribuciones estimados · MXN</legend><div className="field-grid five">{["ISR","IVA","IMSS","INFONAVIT","ISN"].map((type) => <Money key={type} name={type} label={type} value={tax(type)}/>)}</div></fieldset>
     <fieldset disabled={busy || locked}><legend>Lectura ejecutiva</legend><label>Resumen para el cliente<textarea name="executiveSummary" required maxLength={1800} defaultValue={snapshot?.executiveSummary ?? ""} placeholder="Explique los resultados del periodo de forma clara y accionable."/></label><label>Observación o acción sugerida<textarea name="observation" maxLength={1600} defaultValue={detail.observations[0]?.detail ?? ""} placeholder="Señale riesgos, pendientes o recomendaciones específicas."/></label></fieldset>
     <div className="editor-actions"><button type="submit" disabled={busy || locked}>{busy ? "Procesando…" : "Guardar para revisión"}</button><button className="publish" type="button" disabled={busy || locked || !snapshot || detail.period.status !== "review"} onClick={onPublish}>Publicar al cliente</button></div>
+    {message && <div className="editor-feedback" role="status">{message}</div>}
   </form>;
 }
 

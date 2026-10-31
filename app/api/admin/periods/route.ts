@@ -137,7 +137,6 @@ export async function PUT(request: Request) {
   const db = getDb();
   const [period] = await db.select().from(fiscalPeriods).where(eq(fiscalPeriods.id, body.periodId)).limit(1);
   if (!period) return NextResponse.json({ message: "El periodo no existe." }, { status: 404 });
-  if (period.status !== "review") return NextResponse.json({ message: "El periodo debe estar en revisión antes de publicarse." }, { status: 409 });
   if (period.status === "locked") return NextResponse.json({ message: "El periodo está bloqueado y no puede modificarse." }, { status: 409 });
 
   const now = new Date().toISOString();
