@@ -47,7 +47,11 @@ export default function ClientPortal() {
 
         const params = new URLSearchParams(window.location.search);
         if (params.has("code") && params.has("state")) {
-          await client.handleRedirectCallback();
+          const callback = await client.handleRedirectCallback<{ returnTo?: string }>();
+          if (callback.appState?.returnTo === "/admin") {
+            window.location.replace("/admin");
+            return;
+          }
           window.history.replaceState({}, document.title, "/portal");
         } else {
           await client.checkSession();
