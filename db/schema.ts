@@ -91,7 +91,10 @@ export const documents = sqliteTable("documents", {
   objectKey: text("object_key").notNull(),
   mimeType: text("mime_type").notNull(),
   sizeBytes: integer("size_bytes").notNull(),
+  status: text("status", { enum: ["draft", "published"] }).notNull().default("draft"),
   uploadedBy: text("uploaded_by").references(() => users.id, { onDelete: "set null" }),
+  publishedAt: text("published_at"),
+  publishedBy: text("published_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: text("created_at").notNull(),
 }, (table) => [uniqueIndex("documents_object_key_unique").on(table.objectKey)]);
 

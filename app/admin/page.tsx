@@ -35,6 +35,12 @@ type Client = {
   organizationName: string | null;
   membershipRole: "viewer" | "manager" | "advisor" | null;
 };
+type DocumentItem = {
+  id: string; organizationId: string; organizationName: string; periodId: string | null;
+  periodYear: number | null; periodMonth: number | null; title: string; category: string;
+  mimeType: string; sizeBytes: number; status: "draft" | "published";
+  publishedAt: string | null; createdAt: string;
+};
 
 type Screen = "loading" | "anonymous" | "forbidden" | "ready" | "error";
 
@@ -52,6 +58,7 @@ export default function AdminPortal() {
   const [periodDetail, setPeriodDetail] = useState<PeriodDetail>();
   const [clients, setClients] = useState<Client[]>([]);
   const [selectedClient, setSelectedClient] = useState("");
+  const [documents, setDocuments] = useState<DocumentItem[]>([]);
 
   const loadOrganizations = useCallback(async (token: string) => {
     const response = await fetch("/api/admin/organizations", {
@@ -88,6 +95,13 @@ export default function AdminPortal() {
     setSelectedClient((current) => current || data.clients[0]?.id || "");
   }, []);
 
+  const loadDocuments = useCallback(async () => {
+    if (!tokenRef.current) return;
+    const response = await fetch("/api/admin/documents", { headers: { authorization: `Bearer ${tokenRef.current}` }, cache: "no-store" });
+    if (!response.ok) throw new Error("No fue posible consultar los documentos.");
+    setDocuments(((await response.json()) as { documents: DocumentItem[] }).documents);
+  }, []);
+
   const loadPeriodDetail = useCallback(async (periodId: string) => {
     if (!periodId || !tokenRef.current) { setPeriodDetail(undefined); return; }
     const response = await fetch(`/api/admin/periods?periodId=${encodeURIComponent(periodId)}`, { headers: { authorization: `Bearer ${tokenRef.current}` }, cache: "no-store" });
@@ -122,6 +136,7 @@ export default function AdminPortal() {
         tokenRef.current = token;
         await loadOrganizations(token);
         await loadClients();
+        await loadDocuments();
       } catch (error) {
         if (!active) return;
         setMessage(error instanceof Error ? error.message : "No fue posible iniciar el panel.");
@@ -130,7 +145,43 @@ export default function AdminPortal() {
     }
     void initialize();
     return () => { active = false; };
-  }, [loadClients, loadOrganizations]);
+  }, [loadClients, loadDocuments, loadOrganizations]);
+
+  async function uploadDocument(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setBusy(true); setMessage("");
+    const formElement = event.currentTarget;
+    const response = await fetch("/api/admin/documents", { method: "POST", headers: { authorization: `Bearer ${tokenRef.current}` }, body: new FormData(formElement) });
+    const data = (await response.json()) as { message?: string };
+    setMessage(data.message || (response.ok ? "Documento cargado." : "No fue posible cargar el documento."));
+    if (response.ok) { formElement.reset(); await loadDocuments(); }
+    setBusy(false);
+  }
+
+  async function setDocumentStatus(id: string, status: "draft" | "published") {
+    setBusy(true); setMessage("");
+    const response = await fetch("/api/admin/documents", { method: "PATCH", headers: { authorization: `Bearer ${tokenRef.current}`, "content-type": "application/json" }, body: JSON.stringify({ id, status }) });
+    const data = (await response.json()) as { message?: string };
+    setMessage(data.message || "No fue posible actualizar el documento.");
+    if (response.ok) await loadDocuments();
+    setBusy(false);
+  }
+
+  async function deleteDocument(id: string) {
+    if (!window.confirm("¿Eliminar definitivamente este documento?")) return;
+    setBusy(true); setMessage("");
+    const response = await fetch(`/api/admin/documents?id=${encodeURIComponent(id)}`, { method: "DELETE", headers: { authorization: `Bearer ${tokenRef.current}` } });
+    const data = (await response.json()) as { message?: string };
+    setMessage(data.message || "No fue posible eliminar el documento.");
+    if (response.ok) await loadDocuments();
+    setBusy(false);
+  }
+
+  async function downloadDocument(id: string, title: string) {
+    const response = await fetch(`/api/documents/${encodeURIComponent(id)}/download`, { headers: { authorization: `Bearer ${tokenRef.current}` } });
+    if (!response.ok) { setMessage("No fue posible descargar el documento."); return; }
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement("a"); link.href = url; link.download = title; link.click(); URL.revokeObjectURL(url);
+  }
 
   async function signIn() {
     await authRef.current?.loginWithRedirect({
@@ -263,7 +314,7 @@ export default function AdminPortal() {
     <aside className="admin-sidebar">
       <Brand/>
       <p>CONTROL INTERNO</p>
-      <nav><a className="active" href="#empresas">Empresas</a><a href="#periodos">Periodos mensuales</a><a href="#clientes">Clientes</a><span>Documentos · próxima etapa</span></nav>
+      <nav><a className="active" href="#empresas">Empresas</a><a href="#periodos">Periodos mensuales</a><a href="#clientes">Clientes</a><a href="#documentos">Documentos</a></nav>
       <button onClick={signOut}>Cerrar sesión</button>
     </aside>
     <section className="admin-workspace">
@@ -331,6 +382,22 @@ export default function AdminPortal() {
               busy={busy}
               onSubmit={updateClient}
             />}
+          </div>
+        </section>
+
+        <section className="document-admin" id="documentos">
+          <div className="document-heading"><div><small>ARCHIVO PRIVADO</small><h2>Documentos del portal</h2><p>Cargue archivos al expediente. El cliente sólo podrá descargarlos después de su publicación.</p></div><strong>{documents.length}</strong></div>
+          <form className="document-upload" onSubmit={uploadDocument}>
+            <label>Título<input name="title" required maxLength={180} placeholder="Ej. Cédula fiscal de octubre"/></label>
+            <label>Empresa<select name="organizationId" required value={selectedOrganization} onChange={(event) => setSelectedOrganization(event.target.value)}><option value="">Seleccione…</option>{organizations.map((organization) => <option key={organization.id} value={organization.id}>{organization.tradeName}</option>)}</select></label>
+            <label>Periodo opcional<select name="periodId" defaultValue=""><option value="">Sin periodo</option>{periods.map((period) => <option key={period.id} value={period.id}>{months[period.month - 1]} {period.year}</option>)}</select></label>
+            <label>Categoría<select name="category" defaultValue="report"><option value="report">Reporte</option><option value="tax">Fiscal</option><option value="accounting">Contable</option><option value="legal">Legal</option><option value="other">Otro</option></select></label>
+            <label className="document-file">Archivo<input name="file" type="file" required accept=".pdf,.xlsx,.docx,.csv"/></label>
+            <button disabled={busy}>{busy ? "Procesando…" : "Cargar borrador"}</button>
+          </form>
+          <div className="document-list">
+            {documents.map((item) => <article key={item.id}><div><b>{item.title}</b><small>{item.organizationName}{item.periodMonth ? ` · ${months[item.periodMonth - 1]} ${item.periodYear}` : " · Sin periodo"}</small><span>{documentCategory(item.category)} · {formatBytes(item.sizeBytes)}</span></div><i className={`document-status ${item.status}`}>{item.status === "published" ? "Publicado" : "Borrador"}</i><div className="document-actions"><button type="button" onClick={() => void downloadDocument(item.id, item.title)}>Descargar</button><button type="button" disabled={busy} onClick={() => void setDocumentStatus(item.id, item.status === "published" ? "draft" : "published")}>{item.status === "published" ? "Retirar" : "Publicar"}</button><button className="danger" type="button" disabled={busy} onClick={() => void deleteDocument(item.id)}>Eliminar</button></div></article>)}
+            {!documents.length && <p className="admin-empty">Todavía no hay documentos cargados.</p>}
           </div>
         </section>
       </div>
@@ -410,6 +477,8 @@ function formatMoney(value: string | number) {
   return new Intl.NumberFormat("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(parseMoney(String(value)));
 }
 function statusLabel(status: Period["status"]) { return ({ draft: "Borrador", review: "En revisión", published: "Publicado", locked: "Bloqueado" })[status]; }
+function documentCategory(category: string) { return ({ report: "Reporte", tax: "Fiscal", accounting: "Contable", legal: "Legal", other: "Otro" } as Record<string, string>)[category] || "Documento"; }
+function formatBytes(bytes: number) { return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`; }
 
 const months = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
 

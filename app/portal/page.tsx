@@ -22,13 +22,17 @@ type PortalData = {
     executiveSummary: string;
   } | null;
 };
+type PortalDocument = { id: string; title: string; category: string; mimeType: string; sizeBytes: number; periodYear: number | null; periodMonth: number | null; publishedAt: string | null };
 
 export default function ClientPortal() {
   const authRef = useRef<Auth0Client | null>(null);
+  const tokenRef = useRef("");
   const [state, setState] = useState<PortalState>("loading");
   const [user, setUser] = useState<User | undefined>();
   const [portalData, setPortalData] = useState<PortalData>();
   const [error, setError] = useState("");
+  const [documents, setDocuments] = useState<PortalDocument[]>([]);
+  const [documentMessage, setDocumentMessage] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -62,12 +66,15 @@ export default function ClientPortal() {
         if (authenticated) {
           setUser(await client.getUser());
           const accessToken = await client.getTokenSilently();
-          const portalResponse = await fetch("/api/portal/summary", {
-            headers: { authorization: `Bearer ${accessToken}` },
-          });
+          tokenRef.current = accessToken;
+          const [portalResponse, documentResponse] = await Promise.all([
+            fetch("/api/portal/summary", { headers: { authorization: `Bearer ${accessToken}` }, cache: "no-store" }),
+            fetch("/api/portal/documents", { headers: { authorization: `Bearer ${accessToken}` }, cache: "no-store" }),
+          ]);
           if (portalResponse.ok || portalResponse.status === 503) {
             setPortalData((await portalResponse.json()) as PortalData);
           }
+          if (documentResponse.ok) setDocuments(((await documentResponse.json()) as { documents: PortalDocument[] }).documents);
           setState("authenticated");
         } else {
           setState("anonymous");
@@ -105,6 +112,14 @@ export default function ClientPortal() {
     });
   }
 
+  async function downloadDocument(item: PortalDocument) {
+    setDocumentMessage("");
+    const response = await fetch(`/api/documents/${encodeURIComponent(item.id)}/download`, { headers: { authorization: `Bearer ${tokenRef.current}` } });
+    if (!response.ok) { setDocumentMessage("No fue posible descargar el documento. Intente nuevamente."); return; }
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement("a"); link.href = url; link.download = item.title; link.click(); URL.revokeObjectURL(url);
+  }
+
   if (state === "loading") {
     return <main className="auth-screen"><div className="auth-loader"><i/><span>Validando acceso seguro</span></div></main>;
   }
@@ -134,10 +149,12 @@ export default function ClientPortal() {
   const portalMessage = portalData?.message || "El despacho está validando la asignación segura de su expediente.";
   const companyName = portalData?.organization?.tradeName || portalData?.organization?.legalName;
   return <main className="secure-shell">
-    <aside className="secure-sidebar"><Brand/><nav><a className="active" href="#resumen">Resumen</a><a href="#proximamente">Fiscal y contable</a><a href="#proximamente">Documentos</a><a href="#proximamente">Historial</a></nav><button onClick={signOut}>Cerrar sesión</button></aside>
+    <aside className="secure-sidebar"><Brand/><nav><a className="active" href="#resumen">Resumen</a><a href="#proximamente">Fiscal y contable</a><a href="#documentos">Documentos</a><a href="#proximamente">Historial</a></nav><button onClick={signOut}>Cerrar sesión</button></aside>
     <section className="secure-workspace">
       <header><div><small>SESIÓN PROTEGIDA</small><b>{displayName}</b></div><span>{displayName.slice(0, 2).toUpperCase()}</span></header>
-      <div className="secure-content" id="resumen"><p className="auth-kicker">PORTAL VISION</p><h1>{companyName ? `Información de ${companyName}.` : "Bienvenido a su espacio privado."}</h1><p>{isReady ? portalData.snapshot?.executiveSummary : portalMessage}</p><section className="secure-status"><div><small>ESTADO DE ACCESO</small><b>Cuenta activa</b><span>Autenticación completada</span></div><div><small>{isReady ? "INGRESOS DEL MES" : "EXPEDIENTE"}</small><b>{isReady ? formatMoney(portalData.snapshot!.incomeMonthCents) : "En preparación"}</b><span>{isReady ? "Información del periodo publicado" : "Sin información financiera publicada"}</span></div><div><small>{isReady ? "RESULTADO ESTIMADO" : "PRÓXIMO PASO"}</small><b>{isReady ? formatMoney(portalData.snapshot!.estimatedResultCents) : "Asignación del despacho"}</b><span>{isReady ? `${portalData.period?.month}/${portalData.period?.year}` : "Validación interna de permisos"}</span></div></section><article className="secure-notice" id="proximamente"><i>✓</i><div><h2>{isReady ? "Información mensual publicada" : "Acceso habilitado de forma segura"}</h2><p>{isReady ? `Deducciones del mes: ${formatMoney(portalData.snapshot!.deductionsMonthCents)}.` : "Vision Advisors notificará al cliente cuando su primer análisis mensual esté disponible."}</p></div></article>{!isReady && <a className="demo-link" href="/portal-demo">Ver demostración con datos ficticios →</a>}</div>
+      <div className="secure-content" id="resumen"><p className="auth-kicker">PORTAL VISION</p><h1>{companyName ? `Información de ${companyName}.` : "Bienvenido a su espacio privado."}</h1><p>{isReady ? portalData.snapshot?.executiveSummary : portalMessage}</p><section className="secure-status"><div><small>ESTADO DE ACCESO</small><b>Cuenta activa</b><span>Autenticación completada</span></div><div><small>{isReady ? "INGRESOS DEL MES" : "EXPEDIENTE"}</small><b>{isReady ? formatMoney(portalData.snapshot!.incomeMonthCents) : "En preparación"}</b><span>{isReady ? "Información del periodo publicado" : "Sin información financiera publicada"}</span></div><div><small>{isReady ? "RESULTADO ESTIMADO" : "PRÓXIMO PASO"}</small><b>{isReady ? formatMoney(portalData.snapshot!.estimatedResultCents) : "Asignación del despacho"}</b><span>{isReady ? `${portalData.period?.month}/${portalData.period?.year}` : "Validación interna de permisos"}</span></div></section><article className="secure-notice" id="proximamente"><i>✓</i><div><h2>{isReady ? "Información mensual publicada" : "Acceso habilitado de forma segura"}</h2><p>{isReady ? `Deducciones del mes: ${formatMoney(portalData.snapshot!.deductionsMonthCents)}.` : "Vision Advisors notificará al cliente cuando su primer análisis mensual esté disponible."}</p></div></article>{!isReady && <a className="demo-link" href="/portal-demo">Ver demostración con datos ficticios →</a>}
+        <section className="portal-documents" id="documentos"><div><p className="auth-kicker">EXPEDIENTE DIGITAL</p><h2>Documentos disponibles</h2><span>Archivos publicados de forma segura por Vision Advisors.</span></div><div className="portal-document-list">{documents.map((item) => <article key={item.id}><div><b>{item.title}</b><small>{documentCategory(item.category)}{item.periodMonth ? ` · ${item.periodMonth}/${item.periodYear}` : ""} · {formatBytes(item.sizeBytes)}</small></div><button type="button" onClick={() => void downloadDocument(item)}>Descargar ↓</button></article>)}{!documents.length && <p>Aún no hay documentos publicados para su expediente.</p>}</div>{documentMessage && <p className="portal-document-error">{documentMessage}</p>}</section>
+      </div>
     </section>
   </main>;
 }
@@ -145,6 +162,8 @@ export default function ClientPortal() {
 function formatMoney(cents: number) {
   return new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(cents / 100);
 }
+function documentCategory(category: string) { return ({ report: "Reporte", tax: "Fiscal", accounting: "Contable", legal: "Legal", other: "Otro" } as Record<string, string>)[category] || "Documento"; }
+function formatBytes(bytes: number) { return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`; }
 
 function Brand() {
   return <a className="auth-brand" href="/" aria-label="Vision Advisors"><img src="/brand/vision-advisors-logo.png" alt="Vision Advisors"/><span>VISION ADVISORS LATAM</span></a>;
