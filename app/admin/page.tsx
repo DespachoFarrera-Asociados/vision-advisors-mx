@@ -173,7 +173,7 @@ export default function AdminPortal() {
     if (!selectedPeriod) return;
     setBusy(true); setMessage("");
     const form = new FormData(event.currentTarget);
-    const pesos = (name: string) => Math.round(Number(form.get(name) || 0) * 100);
+    const pesos = (name: string) => Math.round(parseMoney(String(form.get(name) || "0")) * 100);
     const response = await fetch("/api/admin/periods", {
       method: "PUT",
       headers: { authorization: `Bearer ${tokenRef.current}`, "content-type": "application/json" },
@@ -279,7 +279,34 @@ function PeriodForm({ detail, busy, message, onSubmit, onPublish }: { detail: Pe
   </form>;
 }
 
-function Money({ name, label, value, signed = false }: { name: string; label: string; value: string; signed?: boolean }) { return <label>{label}<input name={name} type="number" min={signed ? undefined : "0"} step="0.01" required defaultValue={value}/></label>; }
+function Money({ name, label, value, signed = false }: { name: string; label: string; value: string; signed?: boolean }) {
+  const [displayValue, setDisplayValue] = useState(() => formatMoney(value));
+
+  function normalize() {
+    const parsed = parseMoney(displayValue);
+    setDisplayValue(formatMoney(signed ? parsed : Math.max(0, parsed)));
+  }
+
+  return <label>{label}<span className="money-input"><span aria-hidden="true">$</span><input
+    name={name}
+    type="text"
+    inputMode="decimal"
+    required
+    value={displayValue}
+    onChange={(event) => setDisplayValue(event.target.value)}
+    onBlur={normalize}
+    aria-label={`${label} en pesos mexicanos`}
+  /></span></label>;
+}
+
+function parseMoney(value: string) {
+  const parsed = Number(value.replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatMoney(value: string | number) {
+  return new Intl.NumberFormat("es-MX", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(parseMoney(String(value)));
+}
 function statusLabel(status: Period["status"]) { return ({ draft: "Borrador", review: "En revisión", published: "Publicado", locked: "Bloqueado" })[status]; }
 
 const months = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];

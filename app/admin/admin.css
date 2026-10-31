@@ -54,6 +54,9 @@ button, input, select, a { font:inherit; }
 .editor-selectors label,.editor-form label { display:grid; gap:8px; font-size:12px; font-weight:700; }
 .editor-selectors select,.editor-form input,.editor-form textarea { width:100%; padding:13px 14px; border:1px solid #c9cbc3; border-radius:9px; background:white; color:var(--admin-ink); outline:none; }
 .editor-selectors select:focus,.editor-form input:focus,.editor-form textarea:focus { border-color:#8f8b00; box-shadow:0 0 0 3px rgba(255,242,0,.3); }
+.money-input { position:relative; display:block; }
+.money-input>span { position:absolute; left:14px; top:50%; transform:translateY(-50%); color:#62655d; font-weight:700; pointer-events:none; }
+.editor-form .money-input input { padding-left:30px; font-variant-numeric:tabular-nums; }
 .editor-form { margin-top:28px; display:grid; gap:18px; }
 .editor-status { display:flex; align-items:center; gap:14px; }
 .editor-status span { padding:8px 13px; border-radius:999px; font-size:11px; font-weight:800; }
