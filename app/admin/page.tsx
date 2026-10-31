@@ -17,6 +17,14 @@ type Organization = {
   periods: number;
 };
 
+type Period = { id: string; organizationId: string; year: number; month: number; status: "draft" | "review" | "published" | "locked"; publishedAt: string | null; updatedAt: string };
+type PeriodDetail = {
+  period: Period;
+  snapshot: null | { healthScore: number; healthLabel: string; incomeMonthCents: number; incomeYtdCents: number; deductionsMonthCents: number; deductionsYtdCents: number; estimatedResultCents: number; executiveSummary: string };
+  taxes: { taxType: string; amountCents: number }[];
+  observations: { detail: string }[];
+};
+
 type Screen = "loading" | "anonymous" | "forbidden" | "ready" | "error";
 
 export default function AdminPortal() {
@@ -28,6 +36,9 @@ export default function AdminPortal() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [selectedOrganization, setSelectedOrganization] = useState("");
+  const [periods, setPeriods] = useState<Period[]>([]);
+  const [selectedPeriod, setSelectedPeriod] = useState("");
+  const [periodDetail, setPeriodDetail] = useState<PeriodDetail>();
 
   const loadOrganizations = useCallback(async (token: string) => {
     const response = await fetch("/api/admin/organizations", {
@@ -44,6 +55,26 @@ export default function AdminPortal() {
     setSelectedOrganization((current) => current || data.organizations[0]?.id || "");
     setScreen("ready");
   }, []);
+
+  const loadPeriods = useCallback(async (organizationId: string, preferredPeriodId?: string) => {
+    if (!organizationId || !tokenRef.current) { setPeriods([]); setSelectedPeriod(""); setPeriodDetail(undefined); return; }
+    setPeriods([]); setSelectedPeriod(""); setPeriodDetail(undefined);
+    const response = await fetch(`/api/admin/periods?organizationId=${encodeURIComponent(organizationId)}`, { headers: { authorization: `Bearer ${tokenRef.current}` }, cache: "no-store" });
+    if (!response.ok) throw new Error("No fue posible consultar los periodos.");
+    const data = (await response.json()) as { periods: Period[] };
+    setPeriods(data.periods);
+    setSelectedPeriod((current) => preferredPeriodId || (data.periods.some((period) => period.id === current) ? current : data.periods[0]?.id || ""));
+  }, []);
+
+  const loadPeriodDetail = useCallback(async (periodId: string) => {
+    if (!periodId || !tokenRef.current) { setPeriodDetail(undefined); return; }
+    const response = await fetch(`/api/admin/periods?periodId=${encodeURIComponent(periodId)}`, { headers: { authorization: `Bearer ${tokenRef.current}` }, cache: "no-store" });
+    if (!response.ok) throw new Error("No fue posible consultar el periodo.");
+    setPeriodDetail((await response.json()) as PeriodDetail);
+  }, []);
+
+  useEffect(() => { if (screen === "ready") void loadPeriods(selectedOrganization).catch((error) => setMessage(error.message)); }, [loadPeriods, screen, selectedOrganization]);
+  useEffect(() => { void loadPeriodDetail(selectedPeriod).catch((error) => setMessage(error.message)); }, [loadPeriodDetail, selectedPeriod]);
 
   useEffect(() => {
     let active = true;
@@ -103,7 +134,7 @@ export default function AdminPortal() {
       headers: { authorization: `Bearer ${tokenRef.current}`, "content-type": "application/json" },
       body: JSON.stringify({ legalName: form.get("legalName"), tradeName: form.get("tradeName") }),
     });
-    const data = (await response.json()) as { message?: string };
+    const data = (await response.json()) as { id?: string; message?: string };
     if (!response.ok) setMessage(data.message || "No fue posible crear la empresa.");
     else {
       event.currentTarget.reset();
@@ -127,12 +158,45 @@ export default function AdminPortal() {
         month: Number(form.get("month")),
       }),
     });
-    const data = (await response.json()) as { message?: string };
+    const data = (await response.json()) as { id?: string; message?: string };
     if (!response.ok) setMessage(data.message || "No fue posible abrir el periodo.");
     else {
       setMessage("Periodo mensual creado como borrador.");
       await loadOrganizations(tokenRef.current);
+      await loadPeriods(String(form.get("organizationId")), data.id);
     }
+    setBusy(false);
+  }
+
+  async function savePeriod(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedPeriod) return;
+    setBusy(true); setMessage("");
+    const form = new FormData(event.currentTarget);
+    const pesos = (name: string) => Math.round(Number(form.get(name) || 0) * 100);
+    const response = await fetch("/api/admin/periods", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${tokenRef.current}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        periodId: selectedPeriod, healthScore: Number(form.get("healthScore")), healthLabel: form.get("healthLabel"),
+        incomeMonthCents: pesos("incomeMonth"), incomeYtdCents: pesos("incomeYtd"), deductionsMonthCents: pesos("deductionsMonth"),
+        deductionsYtdCents: pesos("deductionsYtd"), estimatedResultCents: pesos("estimatedResult"), executiveSummary: form.get("executiveSummary"),
+        observation: form.get("observation"), taxes: { ISR: pesos("ISR"), IVA: pesos("IVA"), IMSS: pesos("IMSS"), INFONAVIT: pesos("INFONAVIT"), ISN: pesos("ISN") },
+      }),
+    });
+    const data = (await response.json()) as { message?: string };
+    setMessage(data.message || (response.ok ? "Información guardada para revisión." : "No fue posible guardar el periodo."));
+    if (response.ok) { await loadPeriods(selectedOrganization, selectedPeriod); await loadPeriodDetail(selectedPeriod); }
+    setBusy(false);
+  }
+
+  async function publishPeriod() {
+    if (!selectedPeriod || !window.confirm("¿Publicar este periodo? La información será visible para los clientes vinculados a esta empresa.")) return;
+    setBusy(true); setMessage("");
+    const response = await fetch("/api/admin/periods", { method: "PATCH", headers: { authorization: `Bearer ${tokenRef.current}`, "content-type": "application/json" }, body: JSON.stringify({ periodId: selectedPeriod }) });
+    const data = (await response.json()) as { message?: string };
+    setMessage(data.message || (response.ok ? "Periodo publicado." : "No fue posible publicar el periodo."));
+    if (response.ok) { await loadPeriods(selectedOrganization, selectedPeriod); await loadPeriodDetail(selectedPeriod); }
     setBusy(false);
   }
 
@@ -188,10 +252,34 @@ export default function AdminPortal() {
             <button disabled={busy || !organizations.length}>{busy ? "Procesando…" : "Crear periodo"}</button>
           </form>
         </section>
+
+        <section className="period-editor" id="captura">
+          <div className="editor-heading"><div><small>ANÁLISIS MENSUAL</small><h2>Preparar información del cliente</h2><p>Guarde primero para revisión. La publicación requiere una confirmación independiente.</p></div><div className="editor-selectors"><label>Empresa<select value={selectedOrganization} onChange={(event) => setSelectedOrganization(event.target.value)}>{organizations.map((organization) => <option key={organization.id} value={organization.id}>{organization.tradeName}</option>)}</select></label><label>Periodo<select value={selectedPeriod} onChange={(event) => setSelectedPeriod(event.target.value)}><option value="">Seleccione…</option>{periods.map((period) => <option key={period.id} value={period.id}>{months[period.month - 1]} {period.year} · {statusLabel(period.status)}</option>)}</select></label></div></div>
+          {!selectedPeriod && <p className="editor-empty">Abra o seleccione un periodo para comenzar la captura.</p>}
+          {selectedPeriod && periodDetail && <PeriodForm key={`${periodDetail.period.id}-${periodDetail.period.updatedAt}`} detail={periodDetail} busy={busy} onSubmit={savePeriod} onPublish={publishPeriod}/>}
+        </section>
       </div>
     </section>
   </main>;
 }
+
+function PeriodForm({ detail, busy, onSubmit, onPublish }: { detail: PeriodDetail; busy: boolean; onSubmit: (event: FormEvent<HTMLFormElement>) => void; onPublish: () => void }) {
+  const snapshot = detail.snapshot;
+  const amount = (cents?: number) => cents ? (cents / 100).toFixed(2) : "0.00";
+  const tax = (type: string) => amount(detail.taxes.find((item) => item.taxType === type)?.amountCents);
+  const locked = detail.period.status === "locked";
+  return <form className="editor-form" onSubmit={onSubmit}>
+    <div className="editor-status"><span className={`status-${detail.period.status}`}>{statusLabel(detail.period.status)}</span>{detail.period.publishedAt && <small>Publicado: {new Date(detail.period.publishedAt).toLocaleString("es-MX")}</small>}</div>
+    <fieldset disabled={busy || locked}><legend>Indicador ejecutivo</legend><div className="field-grid two"><label>Salud financiera (0 a 100)<input name="healthScore" type="number" min="0" max="100" required defaultValue={snapshot?.healthScore ?? 70}/></label><label>Evaluación<input name="healthLabel" required maxLength={80} defaultValue={snapshot?.healthLabel ?? "Estable con áreas de atención"}/></label></div></fieldset>
+    <fieldset disabled={busy || locked}><legend>Información contable · MXN</legend><div className="field-grid"><Money name="incomeMonth" label="Ingresos del mes" value={amount(snapshot?.incomeMonthCents)}/><Money name="incomeYtd" label="Ingresos acumulados" value={amount(snapshot?.incomeYtdCents)}/><Money name="deductionsMonth" label="Deducciones del mes" value={amount(snapshot?.deductionsMonthCents)}/><Money name="deductionsYtd" label="Deducciones acumuladas" value={amount(snapshot?.deductionsYtdCents)}/><Money name="estimatedResult" label="Resultado estimado" value={amount(snapshot?.estimatedResultCents)} signed/></div></fieldset>
+    <fieldset disabled={busy || locked}><legend>Impuestos y contribuciones estimados · MXN</legend><div className="field-grid five">{["ISR","IVA","IMSS","INFONAVIT","ISN"].map((type) => <Money key={type} name={type} label={type} value={tax(type)}/>)}</div></fieldset>
+    <fieldset disabled={busy || locked}><legend>Lectura ejecutiva</legend><label>Resumen para el cliente<textarea name="executiveSummary" required maxLength={1800} defaultValue={snapshot?.executiveSummary ?? ""} placeholder="Explique los resultados del periodo de forma clara y accionable."/></label><label>Observación o acción sugerida<textarea name="observation" maxLength={1600} defaultValue={detail.observations[0]?.detail ?? ""} placeholder="Señale riesgos, pendientes o recomendaciones específicas."/></label></fieldset>
+    <div className="editor-actions"><button type="submit" disabled={busy || locked}>{busy ? "Procesando…" : "Guardar para revisión"}</button><button className="publish" type="button" disabled={busy || locked || !snapshot || detail.period.status !== "review"} onClick={onPublish}>Publicar al cliente</button></div>
+  </form>;
+}
+
+function Money({ name, label, value, signed = false }: { name: string; label: string; value: string; signed?: boolean }) { return <label>{label}<input name={name} type="number" min={signed ? undefined : "0"} step="0.01" required defaultValue={value}/></label>; }
+function statusLabel(status: Period["status"]) { return ({ draft: "Borrador", review: "En revisión", published: "Publicado", locked: "Bloqueado" })[status]; }
 
 const months = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
 
