@@ -24,6 +24,17 @@ type PeriodDetail = {
   taxes: { taxType: string; amountCents: number }[];
   observations: { detail: string }[];
 };
+type Client = {
+  id: string;
+  email: string;
+  displayName: string;
+  platformRole: "client";
+  status: "invited" | "active" | "suspended";
+  lastAccessAt: string | null;
+  organizationId: string | null;
+  organizationName: string | null;
+  membershipRole: "viewer" | "manager" | "advisor" | null;
+};
 
 type Screen = "loading" | "anonymous" | "forbidden" | "ready" | "error";
 
@@ -39,6 +50,8 @@ export default function AdminPortal() {
   const [periods, setPeriods] = useState<Period[]>([]);
   const [selectedPeriod, setSelectedPeriod] = useState("");
   const [periodDetail, setPeriodDetail] = useState<PeriodDetail>();
+  const [clients, setClients] = useState<Client[]>([]);
+  const [selectedClient, setSelectedClient] = useState("");
 
   const loadOrganizations = useCallback(async (token: string) => {
     const response = await fetch("/api/admin/organizations", {
@@ -64,6 +77,15 @@ export default function AdminPortal() {
     const data = (await response.json()) as { periods: Period[] };
     setPeriods(data.periods);
     setSelectedPeriod((current) => preferredPeriodId || (data.periods.some((period) => period.id === current) ? current : data.periods[0]?.id || ""));
+  }, []);
+
+  const loadClients = useCallback(async () => {
+    if (!tokenRef.current) return;
+    const response = await fetch("/api/admin/clients", { headers: { authorization: `Bearer ${tokenRef.current}` }, cache: "no-store" });
+    if (!response.ok) throw new Error("No fue posible consultar los clientes.");
+    const data = (await response.json()) as { clients: Client[] };
+    setClients(data.clients);
+    setSelectedClient((current) => current || data.clients[0]?.id || "");
   }, []);
 
   const loadPeriodDetail = useCallback(async (periodId: string) => {
@@ -99,6 +121,7 @@ export default function AdminPortal() {
         const token = await client.getTokenSilently();
         tokenRef.current = token;
         await loadOrganizations(token);
+        await loadClients();
       } catch (error) {
         if (!active) return;
         setMessage(error instanceof Error ? error.message : "No fue posible iniciar el panel.");
@@ -107,7 +130,7 @@ export default function AdminPortal() {
     }
     void initialize();
     return () => { active = false; };
-  }, [loadOrganizations]);
+  }, [loadClients, loadOrganizations]);
 
   async function signIn() {
     await authRef.current?.loginWithRedirect({
@@ -200,6 +223,37 @@ export default function AdminPortal() {
     setBusy(false);
   }
 
+  async function updateClient(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true); setMessage("");
+    const form = new FormData(event.currentTarget);
+    const response = await fetch("/api/admin/clients", {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${tokenRef.current}`, "content-type": "application/json" },
+      body: JSON.stringify({ userId: form.get("userId"), organizationId: form.get("organizationId"), membershipRole: form.get("membershipRole"), status: form.get("status") }),
+    });
+    const data = (await response.json()) as { message?: string };
+    setMessage(data.message || (response.ok ? "Cliente actualizado." : "No fue posible actualizar el cliente."));
+    if (response.ok) { await loadClients(); await loadOrganizations(tokenRef.current); }
+    setBusy(false);
+  }
+
+  async function createClient(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true); setMessage("");
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const response = await fetch("/api/admin/clients", {
+      method: "POST",
+      headers: { authorization: `Bearer ${tokenRef.current}`, "content-type": "application/json" },
+      body: JSON.stringify({ identitySubject: form.get("identitySubject"), email: form.get("email"), displayName: form.get("displayName"), organizationId: form.get("organizationId"), membershipRole: form.get("membershipRole") }),
+    });
+    const data = (await response.json()) as { message?: string };
+    setMessage(data.message || (response.ok ? "Cliente incorporado." : "No fue posible incorporar el cliente."));
+    if (response.ok) { formElement.reset(); await loadClients(); await loadOrganizations(tokenRef.current); }
+    setBusy(false);
+  }
+
   if (screen === "loading") return <main className="admin-gate"><span className="admin-spinner"/>Validando permisos del despacho…</main>;
   if (screen === "anonymous") return <Gate title="Panel del despacho" copy="Inicie sesión con una cuenta autorizada de Vision Advisors." action="Ingresar" onAction={signIn}/>;
   if (screen === "forbidden") return <Gate title="Acceso restringido" copy="Su sesión es válida, pero esta cuenta no tiene permisos administrativos." action="Cerrar sesión" onAction={signOut}/>;
@@ -209,7 +263,7 @@ export default function AdminPortal() {
     <aside className="admin-sidebar">
       <Brand/>
       <p>CONTROL INTERNO</p>
-      <nav><a className="active" href="#empresas">Empresas</a><a href="#periodos">Periodos mensuales</a><span>Clientes · próxima etapa</span><span>Documentos · próxima etapa</span></nav>
+      <nav><a className="active" href="#empresas">Empresas</a><a href="#periodos">Periodos mensuales</a><a href="#clientes">Clientes</a><span>Documentos · próxima etapa</span></nav>
       <button onClick={signOut}>Cerrar sesión</button>
     </aside>
     <section className="admin-workspace">
@@ -258,9 +312,57 @@ export default function AdminPortal() {
           {!selectedPeriod && <p className="editor-empty">Abra o seleccione un periodo para comenzar la captura.</p>}
           {selectedPeriod && periodDetail && <PeriodForm key={`${periodDetail.period.id}-${periodDetail.period.updatedAt}`} detail={periodDetail} busy={busy} message={message} onSubmit={savePeriod} onPublish={publishPeriod}/>}
         </section>
+
+        <section className="client-admin" id="clientes">
+          <div className="client-heading"><div><small>ACCESOS Y VINCULACIONES</small><h2>Clientes del portal</h2><p>Asigne cada usuario a una sola empresa y controle su acceso. Las contraseñas permanecen exclusivamente en Auth0.</p></div><strong>{clients.length}</strong></div>
+          <ClientOnboardingForm organizations={organizations} busy={busy} onSubmit={createClient}/>
+          <div className="client-layout">
+            <div className="client-list">
+              {clients.map((client) => <button type="button" className={selectedClient === client.id ? "selected" : ""} key={client.id} onClick={() => setSelectedClient(client.id)}>
+                <span><b>{client.displayName || client.email}</b><small>{client.email}</small></span>
+                <span><small>{client.organizationName || "Sin empresa"}</small><i className={`client-status status-${client.status}`}>{client.status === "active" ? "Activo" : client.status === "suspended" ? "Suspendido" : "Invitado"}</i></span>
+              </button>)}
+              {!clients.length && <p className="admin-empty">Todavía no hay usuarios cliente sincronizados con el portal.</p>}
+            </div>
+            {selectedClient && <ClientAssignmentForm
+              key={`${selectedClient}-${clients.find((client) => client.id === selectedClient)?.organizationId}`}
+              client={clients.find((client) => client.id === selectedClient)!}
+              organizations={organizations}
+              busy={busy}
+              onSubmit={updateClient}
+            />}
+          </div>
+        </section>
       </div>
     </section>
   </main>;
+}
+
+function ClientOnboardingForm({ organizations, busy, onSubmit }: { organizations: Organization[]; busy: boolean; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
+  return <details className="client-onboarding">
+    <summary>Incorporar una cuenta existente de Auth0</summary>
+    <form onSubmit={onSubmit}>
+      <p>Cree primero el usuario y su contraseña en Auth0. Después copie aquí su ID de usuario para vincularlo con un expediente.</p>
+      <label>RFC / nombre de usuario<input name="displayName" required placeholder="Ej. ABC010203AB1" autoComplete="off"/></label>
+      <label>Correo electrónico<input name="email" type="email" required placeholder="cliente@empresa.com" autoComplete="off"/></label>
+      <label>ID de usuario de Auth0<input name="identitySubject" required placeholder="auth0|..." autoComplete="off"/></label>
+      <label>Empresa<select name="organizationId" required defaultValue=""><option value="">Seleccione…</option>{organizations.filter((organization) => organization.status !== "archived").map((organization) => <option key={organization.id} value={organization.id}>{organization.tradeName}</option>)}</select></label>
+      <label>Permiso<select name="membershipRole" defaultValue="viewer"><option value="viewer">Consulta</option><option value="manager">Responsable de la empresa</option></select></label>
+      <button disabled={busy}>{busy ? "Incorporando…" : "Incorporar cliente"}</button>
+    </form>
+  </details>;
+}
+
+function ClientAssignmentForm({ client, organizations, busy, onSubmit }: { client: Client; organizations: Organization[]; busy: boolean; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
+  return <form className="client-form" onSubmit={onSubmit}>
+    <input type="hidden" name="userId" value={client.id}/>
+    <small>EDITAR ACCESO</small><h3>{client.displayName || "Cliente"}</h3><p>{client.email}</p>
+    <label>Empresa vinculada<select name="organizationId" required defaultValue={client.organizationId || ""}><option value="">Seleccione…</option>{organizations.filter((organization) => organization.status !== "archived").map((organization) => <option key={organization.id} value={organization.id}>{organization.tradeName}</option>)}</select></label>
+    <label>Permiso dentro de la empresa<select name="membershipRole" defaultValue={client.membershipRole === "manager" ? "manager" : "viewer"}><option value="viewer">Consulta</option><option value="manager">Responsable de la empresa</option></select></label>
+    <label>Estado de acceso<select name="status" defaultValue={client.status === "suspended" ? "suspended" : "active"}><option value="active">Activo</option><option value="suspended">Suspendido</option></select></label>
+    <p className="client-note">Para crear la cuenta o cambiar su contraseña utilice Auth0. Este panel únicamente controla qué expediente puede consultar.</p>
+    <button disabled={busy}>{busy ? "Guardando…" : "Guardar vinculación"}</button>
+  </form>;
 }
 
 function PeriodForm({ detail, busy, message, onSubmit, onPublish }: { detail: PeriodDetail; busy: boolean; message: string; onSubmit: (event: FormEvent<HTMLFormElement>) => void; onPublish: () => void }) {

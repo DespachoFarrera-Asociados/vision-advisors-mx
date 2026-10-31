@@ -71,6 +71,38 @@ button, input, select, a { font:inherit; }
 .editor-actions { display:flex; gap:12px; justify-content:flex-end; }
 .editor-actions button { padding:15px 22px; border:1px solid var(--admin-ink); border-radius:10px; background:transparent; font-weight:800; cursor:pointer; }
 .editor-actions button.publish { border-color:var(--admin-yellow); background:var(--admin-yellow); }
+.client-admin { margin-top:22px; padding:30px; border:1px solid #d4d6ce; border-radius:20px; background:var(--admin-card); scroll-margin-top:24px; }
+.client-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:30px; }
+.client-heading small,.client-form>small { font-size:10px; font-weight:800; letter-spacing:.3em; }
+.client-heading h2 { margin:8px 0; font:38px/1.1 Georgia,serif; }
+.client-heading p { max-width:760px; color:var(--admin-muted); line-height:1.55; }
+.client-heading>strong { min-width:54px; height:54px; display:grid; place-items:center; border-radius:50%; background:var(--admin-yellow); }
+.client-onboarding { margin-top:24px; border:1px solid #d5d7cf; border-radius:14px; background:#f1f2ed; }
+.client-onboarding summary { padding:17px 20px; cursor:pointer; font-weight:800; }
+.client-onboarding form { padding:0 20px 20px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+.client-onboarding form>p { grid-column:1/-1; margin:0 0 4px; color:var(--admin-muted); line-height:1.5; }
+.client-onboarding label { display:grid; gap:7px; font-size:12px; font-weight:700; }
+.client-onboarding input,.client-onboarding select { width:100%; padding:13px 14px; border:1px solid #c9cbc3; border-radius:9px; background:white; color:var(--admin-ink); }
+.client-onboarding button { align-self:end; min-height:45px; padding:12px 18px; border:0; border-radius:9px; background:var(--admin-yellow); font-weight:800; cursor:pointer; }
+.client-onboarding button:disabled { opacity:.5; cursor:not-allowed; }
+.client-layout { margin-top:28px; display:grid; grid-template-columns:minmax(0,1.35fr) minmax(320px,.65fr); gap:22px; align-items:start; }
+.client-list { display:grid; gap:9px; }
+.client-list>button { width:100%; padding:17px 18px; display:flex; justify-content:space-between; gap:18px; text-align:left; border:1px solid #d5d7cf; border-radius:12px; background:white; color:var(--admin-ink); cursor:pointer; }
+.client-list>button.selected { border-color:#8f8b00; box-shadow:0 0 0 3px rgba(255,242,0,.28); }
+.client-list span { display:grid; gap:5px; }
+.client-list span:last-child { justify-items:end; text-align:right; }
+.client-list small { color:var(--admin-muted); }
+.client-list i { font-style:normal; font-size:10px; padding:5px 9px; border-radius:999px; background:#e7eadf; }
+.client-list .status-suspended { background:#f2dfdc; color:#8b2f24; }
+.client-list .status-invited { background:#fff5bd; color:#625900; }
+.client-form { padding:24px; display:grid; gap:16px; border:1px solid #d5d7cf; border-radius:14px; background:#f1f2ed; }
+.client-form h3 { margin:0; font:28px/1.1 Georgia,serif; overflow-wrap:anywhere; }
+.client-form>p { margin:0; color:var(--admin-muted); overflow-wrap:anywhere; }
+.client-form label { display:grid; gap:7px; font-size:12px; font-weight:700; }
+.client-form select { width:100%; padding:13px 14px; border:1px solid #c9cbc3; border-radius:9px; background:white; color:var(--admin-ink); }
+.client-form .client-note { font-size:11px; line-height:1.5; }
+.client-form button { padding:15px 20px; border:0; border-radius:10px; background:var(--admin-yellow); font-weight:800; cursor:pointer; }
+.client-form button:disabled { opacity:.5; cursor:not-allowed; }
 .editor-actions button:disabled { opacity:.45; cursor:not-allowed; }
 .admin-gate { min-height:100vh; background:#0c0f0c; color:white; display:grid; place-items:center; padding:30px; }
 .admin-gate>section { width:min(520px,100%); display:grid; gap:20px; padding:40px; border:1px solid #363a32; border-radius:22px; background:rgba(255,255,255,.03); }
@@ -79,5 +111,5 @@ button, input, select, a { font:inherit; }
 .admin-gate>section>span { color:#adb0a7; line-height:1.6; }
 .admin-spinner { width:25px; height:25px; margin-right:12px; border:2px solid #44483f; border-top-color:var(--admin-yellow); border-radius:50%; animation:adminSpin .8s linear infinite; }
 @keyframes adminSpin { to { transform:rotate(360deg); } }
-@media (max-width:1000px) { .admin-shell{grid-template-columns:1fr}.admin-sidebar{position:static;height:auto;padding:20px}.admin-sidebar nav,.admin-sidebar>p{display:none}.admin-sidebar>button{margin:10px 0 0}.admin-grid,.admin-period{grid-template-columns:1fr}.admin-period form{grid-template-columns:1fr 1fr}.admin-row{grid-template-columns:1fr 60px 60px}.admin-row i{display:none}.editor-heading{align-items:stretch;flex-direction:column}.editor-selectors{min-width:0;width:100%}.field-grid,.field-grid.five{grid-template-columns:repeat(2,1fr)} }
-@media (max-width:620px) { .admin-content{width:calc(100% - 32px);padding-top:45px}.admin-content>h1{font-size:48px}.admin-workspace>header{height:80px}.admin-grid{margin-top:35px}.admin-panel{padding:20px}.admin-row{grid-template-columns:1fr}.admin-row>span:not(:first-child){display:none}.admin-period,.period-editor{padding:22px}.admin-period form,.editor-selectors,.field-grid,.field-grid.two,.field-grid.five{grid-template-columns:1fr}.admin-gate>section{padding:28px}.editor-actions{flex-direction:column}.editor-actions button{width:100%} }
+@media (max-width:1000px) { .admin-shell{grid-template-columns:1fr}.admin-sidebar{position:static;height:auto;padding:20px}.admin-sidebar nav,.admin-sidebar>p{display:none}.admin-sidebar>button{margin:10px 0 0}.admin-grid,.admin-period,.client-layout{grid-template-columns:1fr}.admin-period form{grid-template-columns:1fr 1fr}.admin-row{grid-template-columns:1fr 60px 60px}.admin-row i{display:none}.editor-heading{align-items:stretch;flex-direction:column}.editor-selectors{min-width:0;width:100%}.field-grid,.field-grid.five{grid-template-columns:repeat(2,1fr)} }
+@media (max-width:620px) { .admin-content{width:calc(100% - 32px);padding-top:45px}.admin-content>h1{font-size:48px}.admin-workspace>header{height:80px}.admin-grid{margin-top:35px}.admin-panel{padding:20px}.admin-row{grid-template-columns:1fr}.admin-row>span:not(:first-child){display:none}.admin-period,.period-editor,.client-admin{padding:22px}.admin-period form,.editor-selectors,.field-grid,.field-grid.two,.field-grid.five,.client-onboarding form{grid-template-columns:1fr}.client-heading{align-items:flex-start;flex-direction:column-reverse}.client-list>button{flex-direction:column}.client-list span:last-child{justify-items:start;text-align:left}.admin-gate>section{padding:28px}.editor-actions{flex-direction:column}.editor-actions button{width:100%} }
