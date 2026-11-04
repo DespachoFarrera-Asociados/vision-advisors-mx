@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { getDb } from "@/db";
-import { documents, fiscalPeriods, memberships, monthlySnapshots, observations } from "@/db/schema";
+import { documents, fiscalPeriods, memberships, monthlySnapshots, observations, taxSummaries } from "@/db/schema";
 import { getPortalUser } from "@/lib/portal-auth";
 
 export async function GET(request: Request) {
@@ -24,15 +24,17 @@ export async function GET(request: Request) {
   ));
 
   const history = await Promise.all(periods.map(async (period) => {
-    const [snapshotRows, observationRows, documentRows] = await Promise.all([
+    const [snapshotRows, taxRows, observationRows, documentRows] = await Promise.all([
       db.select().from(monthlySnapshots).where(eq(monthlySnapshots.periodId, period.id)).limit(1),
+      db.select({ taxType: taxSummaries.taxType, amountCents: taxSummaries.amountCents, status: taxSummaries.status, dueDate: taxSummaries.dueDate })
+        .from(taxSummaries).where(eq(taxSummaries.periodId, period.id)),
       db.select({ title: observations.title, detail: observations.detail }).from(observations)
         .where(eq(observations.periodId, period.id)).orderBy(observations.sortOrder),
       db.select({ id: documents.id }).from(documents)
         .where(and(eq(documents.periodId, period.id), eq(documents.status, "published"))),
     ]);
     return { id: period.id, year: period.year, month: period.month, publishedAt: period.publishedAt,
-      snapshot: snapshotRows[0] ?? null, observations: observationRows,
+      snapshot: snapshotRows[0] ?? null, taxes: taxRows, observations: observationRows,
       documentCount: documentRows.length, generalDocumentCount: generalDocuments.length };
   }));
   return NextResponse.json({ periods: history });
