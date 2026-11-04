@@ -69,15 +69,16 @@ export default function ClientPortal() {
           setUser(await client.getUser());
           const accessToken = await client.getTokenSilently();
           tokenRef.current = accessToken;
-          const [portalResponse, documentResponse, historyResponse] = await Promise.all([
-            fetch("/api/portal/summary", { headers: { authorization: `Bearer ${accessToken}` }, cache: "no-store" }),
-            fetch("/api/portal/documents", { headers: { authorization: `Bearer ${accessToken}` }, cache: "no-store" }),
-            fetch("/api/portal/history", { headers: { authorization: `Bearer ${accessToken}` }, cache: "no-store" }),
-          ]);
+          // Auth0 can throttle simultaneous /userinfo validations for the same
+          // token. Load each protected resource in sequence so all three APIs
+          // resolve the same portal identity reliably.
+          const portalResponse = await fetch("/api/portal/summary", { headers: { authorization: `Bearer ${accessToken}` }, cache: "no-store" });
           if (portalResponse.ok || portalResponse.status === 503) {
             setPortalData((await portalResponse.json()) as PortalData);
           }
+          const documentResponse = await fetch("/api/portal/documents", { headers: { authorization: `Bearer ${accessToken}` }, cache: "no-store" });
           if (documentResponse.ok) setDocuments(((await documentResponse.json()) as { documents: PortalDocument[] }).documents);
+          const historyResponse = await fetch("/api/portal/history", { headers: { authorization: `Bearer ${accessToken}` }, cache: "no-store" });
           if (historyResponse.ok) setHistory(((await historyResponse.json()) as { periods: HistoryPeriod[] }).periods);
           setState("authenticated");
         } else {
