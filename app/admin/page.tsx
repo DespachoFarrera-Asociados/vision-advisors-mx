@@ -60,20 +60,21 @@ export default function AdminPortal() {
   const [selectedClient, setSelectedClient] = useState("");
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
 
-  const loadOrganizations = useCallback(async (token: string) => {
+  const loadOrganizations = useCallback(async (token: string, markReady = true) => {
     const response = await fetch("/api/admin/organizations", {
       headers: { authorization: `Bearer ${token}` },
       cache: "no-store",
     });
     if (response.status === 403) {
       setScreen("forbidden");
-      return;
+      return false;
     }
     if (!response.ok) throw new Error("No fue posible consultar las empresas.");
     const data = (await response.json()) as { organizations: Organization[] };
     setOrganizations(data.organizations);
     setSelectedOrganization((current) => current || data.organizations[0]?.id || "");
-    setScreen("ready");
+    if (markReady) setScreen("ready");
+    return true;
   }, []);
 
   const loadPeriods = useCallback(async (organizationId: string, preferredPeriodId?: string) => {
@@ -134,9 +135,11 @@ export default function AdminPortal() {
         setUser(await client.getUser());
         const token = await client.getTokenSilently();
         tokenRef.current = token;
-        await loadOrganizations(token);
+        const authorized = await loadOrganizations(token, false);
+        if (!authorized || !active) return;
         await loadClients();
         await loadDocuments();
+        if (active) setScreen("ready");
       } catch (error) {
         if (!active) return;
         setMessage(error instanceof Error ? error.message : "No fue posible iniciar el panel.");
