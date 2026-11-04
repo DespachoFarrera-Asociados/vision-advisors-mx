@@ -169,6 +169,15 @@ export default function AdminPortal() {
     setBusy(false);
   }
 
+  async function updateDocumentPeriod(id: string, periodId: string) {
+    setBusy(true); setMessage("");
+    const response = await fetch("/api/admin/documents", { method: "PATCH", headers: { authorization: `Bearer ${tokenRef.current}`, "content-type": "application/json" }, body: JSON.stringify({ id, periodId: periodId || null }) });
+    const data = (await response.json()) as { message?: string };
+    setMessage(data.message || "No fue posible actualizar el periodo del documento.");
+    if (response.ok) await loadDocuments();
+    setBusy(false);
+  }
+
   async function deleteDocument(id: string) {
     if (!window.confirm("¿Eliminar definitivamente este documento?")) return;
     setBusy(true); setMessage("");
@@ -257,7 +266,7 @@ export default function AdminPortal() {
       body: JSON.stringify({
         periodId: selectedPeriod, healthScore: Number(form.get("healthScore")), healthLabel: form.get("healthLabel"),
         incomeMonthCents: pesos("incomeMonth"), incomeYtdCents: pesos("incomeYtd"), deductionsMonthCents: pesos("deductionsMonth"),
-        deductionsYtdCents: pesos("deductionsYtd"), estimatedResultCents: pesos("estimatedResult"), executiveSummary: form.get("executiveSummary"),
+        deductionsYtdCents: pesos("deductionsYtd"), executiveSummary: form.get("executiveSummary"),
         observation: form.get("observation"), taxes: { ISR: pesos("ISR"), IVA: pesos("IVA"), IMSS: pesos("IMSS"), INFONAVIT: pesos("INFONAVIT"), ISN: pesos("ISN") },
       }),
     });
@@ -399,7 +408,7 @@ export default function AdminPortal() {
             <button disabled={busy}>{busy ? "Procesando…" : "Cargar borrador"}</button>
           </form>
           <div className="document-list">
-            {documents.map((item) => <article key={item.id}><div><b>{item.title}</b><small>{item.organizationName}{item.periodMonth ? ` · ${months[item.periodMonth - 1]} ${item.periodYear}` : " · Sin periodo"}</small><span>{documentCategory(item.category)} · {formatBytes(item.sizeBytes)}</span></div><i className={`document-status ${item.status}`}>{item.status === "published" ? "Publicado" : "Borrador"}</i><div className="document-actions"><button type="button" onClick={() => void downloadDocument(item.id, item.title)}>Descargar</button><button type="button" disabled={busy} onClick={() => void setDocumentStatus(item.id, item.status === "published" ? "draft" : "published")}>{item.status === "published" ? "Retirar" : "Publicar"}</button><button className="danger" type="button" disabled={busy} onClick={() => void deleteDocument(item.id)}>Eliminar</button></div></article>)}
+            {documents.map((item) => <article key={item.id}><div><b>{item.title}</b><small>{item.organizationName}{item.periodMonth ? ` · ${months[item.periodMonth - 1]} ${item.periodYear}` : " · Documento general"}</small><span>{documentCategory(item.category)} · {formatBytes(item.sizeBytes)}</span></div><label className="document-period">Periodo<select value={item.periodId || ""} disabled={busy || item.organizationId !== selectedOrganization} onChange={(event) => void updateDocumentPeriod(item.id, event.target.value)}><option value="">General / sin periodo</option>{periods.map((period) => <option key={period.id} value={period.id}>{months[period.month - 1]} {period.year}</option>)}</select></label><i className={`document-status ${item.status}`}>{item.status === "published" ? "Publicado" : "Borrador"}</i><div className="document-actions"><button type="button" onClick={() => void downloadDocument(item.id, item.title)}>Descargar</button><button type="button" disabled={busy} onClick={() => void setDocumentStatus(item.id, item.status === "published" ? "draft" : "published")}>{item.status === "published" ? "Retirar" : "Publicar"}</button><button className="danger" type="button" disabled={busy} onClick={() => void deleteDocument(item.id)}>Eliminar</button></div></article>)}
             {!documents.length && <p className="admin-empty">Todavía no hay documentos cargados.</p>}
           </div>
         </section>
@@ -440,10 +449,13 @@ function PeriodForm({ detail, busy, message, onSubmit, onPublish }: { detail: Pe
   const amount = (cents?: number) => cents ? (cents / 100).toFixed(2) : "0.00";
   const tax = (type: string) => amount(detail.taxes.find((item) => item.taxType === type)?.amountCents);
   const locked = detail.period.status === "locked";
+  const [incomeMonth, setIncomeMonth] = useState((snapshot?.incomeMonthCents || 0) / 100);
+  const [deductionsMonth, setDeductionsMonth] = useState((snapshot?.deductionsMonthCents || 0) / 100);
+  const calculatedResult = incomeMonth - deductionsMonth;
   return <form className="editor-form" onSubmit={onSubmit}>
     <div className="editor-status"><span className={`status-${detail.period.status}`}>{statusLabel(detail.period.status)}</span>{detail.period.publishedAt && <small>Publicado: {new Date(detail.period.publishedAt).toLocaleString("es-MX")}</small>}</div>
     <fieldset disabled={busy || locked}><legend>Indicador ejecutivo</legend><div className="field-grid two"><label>Salud financiera (0 a 100)<input name="healthScore" type="number" min="0" max="100" required defaultValue={snapshot?.healthScore ?? 70}/></label><label>Evaluación<input name="healthLabel" required maxLength={80} defaultValue={snapshot?.healthLabel ?? "Estable con áreas de atención"}/></label></div></fieldset>
-    <fieldset disabled={busy || locked}><legend>Información contable · MXN</legend><div className="field-grid"><Money name="incomeMonth" label="Ingresos del mes" value={amount(snapshot?.incomeMonthCents)}/><Money name="incomeYtd" label="Ingresos acumulados" value={amount(snapshot?.incomeYtdCents)}/><Money name="deductionsMonth" label="Deducciones del mes" value={amount(snapshot?.deductionsMonthCents)}/><Money name="deductionsYtd" label="Deducciones acumuladas" value={amount(snapshot?.deductionsYtdCents)}/><Money name="estimatedResult" label="Resultado estimado" value={amount(snapshot?.estimatedResultCents)} signed/></div></fieldset>
+    <fieldset disabled={busy || locked}><legend>Información contable · MXN</legend><div className="field-grid"><Money name="incomeMonth" label="Ingresos del mes" value={amount(snapshot?.incomeMonthCents)} onValueChange={setIncomeMonth}/><Money name="incomeYtd" label="Ingresos acumulados" value={amount(snapshot?.incomeYtdCents)}/><Money name="deductionsMonth" label="Deducciones del mes" value={amount(snapshot?.deductionsMonthCents)} onValueChange={setDeductionsMonth}/><Money name="deductionsYtd" label="Deducciones acumuladas" value={amount(snapshot?.deductionsYtdCents)}/><label>Resultado calculado<span className="money-input calculated"><span aria-hidden="true">$</span><input type="text" readOnly value={formatMoney(calculatedResult)} aria-label="Resultado calculado en pesos mexicanos"/></span></label></div></fieldset>
     <fieldset disabled={busy || locked}><legend>Impuestos y contribuciones estimados · MXN</legend><div className="field-grid five">{["ISR","IVA","IMSS","INFONAVIT","ISN"].map((type) => <Money key={type} name={type} label={type} value={tax(type)}/>)}</div></fieldset>
     <fieldset disabled={busy || locked}><legend>Lectura ejecutiva</legend><label>Resumen para el cliente<textarea name="executiveSummary" required maxLength={1800} defaultValue={snapshot?.executiveSummary ?? ""} placeholder="Explique los resultados del periodo de forma clara y accionable."/></label><label>Observación o acción sugerida<textarea name="observation" maxLength={1600} defaultValue={detail.observations[0]?.detail ?? ""} placeholder="Señale riesgos, pendientes o recomendaciones específicas."/></label></fieldset>
     <div className="editor-actions"><button type="submit" disabled={busy || locked}>{busy ? "Procesando…" : "Guardar para revisión"}</button><button className="publish" type="button" disabled={busy || locked || !snapshot || detail.period.status !== "review"} onClick={onPublish}>Publicar al cliente</button></div>
@@ -451,7 +463,7 @@ function PeriodForm({ detail, busy, message, onSubmit, onPublish }: { detail: Pe
   </form>;
 }
 
-function Money({ name, label, value, signed = false }: { name: string; label: string; value: string; signed?: boolean }) {
+function Money({ name, label, value, signed = false, onValueChange }: { name: string; label: string; value: string; signed?: boolean; onValueChange?: (value: number) => void }) {
   const [displayValue, setDisplayValue] = useState(() => formatMoney(value));
 
   function normalize() {
@@ -465,7 +477,7 @@ function Money({ name, label, value, signed = false }: { name: string; label: st
     inputMode="decimal"
     required
     value={displayValue}
-    onChange={(event) => setDisplayValue(event.target.value)}
+    onChange={(event) => { setDisplayValue(event.target.value); onValueChange?.(parseMoney(event.target.value)); }}
     onBlur={normalize}
     aria-label={`${label} en pesos mexicanos`}
   /></span></label>;

@@ -14,8 +14,13 @@ function validCents(value: unknown) {
   return Number.isSafeInteger(value) && Number(value) >= 0 && Number(value) <= 900_000_000_000;
 }
 
-function validSignedCents(value: unknown) {
-  return Number.isSafeInteger(value) && Math.abs(Number(value)) <= 900_000_000_000;
+const monthNames = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+
+function alignPeriodReference(summary: string, year: number, month: number) {
+  return summary.replace(
+    /\b(periodo\s+)(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)(\s+de)?\s+\d{4}\b/gi,
+    (_match, prefix: string) => `${prefix}${monthNames[month - 1]} ${year}`,
+  );
 }
 
 export async function GET(request: Request) {
@@ -120,12 +125,12 @@ export async function PUT(request: Request) {
     taxes?: Partial<Record<(typeof taxTypes)[number], number>>;
   };
   const amounts = [body.incomeMonthCents, body.incomeYtdCents, body.deductionsMonthCents, body.deductionsYtdCents];
-  if (!body.periodId || amounts.some((amount) => !validCents(amount)) || !validSignedCents(body.estimatedResultCents) || !Number.isInteger(body.healthScore) || Number(body.healthScore) < 0 || Number(body.healthScore) > 100) {
+  if (!body.periodId || amounts.some((amount) => !validCents(amount)) || !Number.isInteger(body.healthScore) || Number(body.healthScore) < 0 || Number(body.healthScore) > 100) {
     return NextResponse.json({ message: "Revise las cantidades y el indicador de salud." }, { status: 400 });
   }
-  const summary = body.executiveSummary?.trim();
+  const rawSummary = body.executiveSummary?.trim();
   const healthLabel = body.healthLabel?.trim();
-  if (!summary || summary.length > 1800 || !healthLabel || healthLabel.length > 80) {
+  if (!rawSummary || rawSummary.length > 1800 || !healthLabel || healthLabel.length > 80) {
     return NextResponse.json({ message: "Capture un resumen ejecutivo y una evaluación válidos." }, { status: 400 });
   }
   for (const taxType of taxTypes) {
@@ -140,8 +145,9 @@ export async function PUT(request: Request) {
   if (period.status === "locked") return NextResponse.json({ message: "El periodo está bloqueado y no puede modificarse." }, { status: 409 });
 
   const now = new Date().toISOString();
-  const result = Number(body.estimatedResultCents);
   const income = Number(body.incomeMonthCents);
+  const result = income - Number(body.deductionsMonthCents);
+  const summary = alignPeriodReference(rawSummary, period.year, period.month);
   const margin = income > 0 ? Math.round((result / income) * 10_000) : 0;
   await db.insert(monthlySnapshots).values({
     id: `snp_${crypto.randomUUID()}`,
@@ -203,6 +209,13 @@ export async function PATCH(request: Request) {
   if (!period) return NextResponse.json({ message: "El periodo no existe." }, { status: 404 });
   const [snapshot] = await db.select({ id: monthlySnapshots.id }).from(monthlySnapshots).where(eq(monthlySnapshots.periodId, period.id)).limit(1);
   if (!snapshot) return NextResponse.json({ message: "Guarde la información del periodo antes de publicarlo." }, { status: 409 });
+
+  const today = new Date();
+  const periodStart = Date.UTC(period.year, period.month - 1, 1);
+  const currentMonthStart = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1);
+  if (periodStart > currentMonthStart) {
+    return NextResponse.json({ message: "No se puede publicar un periodo futuro. Espere a que comience el mes correspondiente." }, { status: 409 });
+  }
 
   const now = new Date().toISOString();
   await db.update(fiscalPeriods).set({ status: "published", publishedAt: now, publishedBy: actor.id, updatedAt: now }).where(eq(fiscalPeriods.id, period.id));

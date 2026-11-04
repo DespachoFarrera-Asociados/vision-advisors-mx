@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { getDb } from "@/db";
 import { documents, fiscalPeriods, memberships, monthlySnapshots, observations } from "@/db/schema";
@@ -17,6 +17,12 @@ export async function GET(request: Request) {
     inArray(fiscalPeriods.status, ["published", "locked"]),
   )).orderBy(desc(fiscalPeriods.year), desc(fiscalPeriods.month));
 
+  const generalDocuments = await db.select({ id: documents.id }).from(documents).where(and(
+    eq(documents.organizationId, membership.organizationId),
+    eq(documents.status, "published"),
+    isNull(documents.periodId),
+  ));
+
   const history = await Promise.all(periods.map(async (period) => {
     const [snapshotRows, observationRows, documentRows] = await Promise.all([
       db.select().from(monthlySnapshots).where(eq(monthlySnapshots.periodId, period.id)).limit(1),
@@ -26,7 +32,8 @@ export async function GET(request: Request) {
         .where(and(eq(documents.periodId, period.id), eq(documents.status, "published"))),
     ]);
     return { id: period.id, year: period.year, month: period.month, publishedAt: period.publishedAt,
-      snapshot: snapshotRows[0] ?? null, observations: observationRows, documentCount: documentRows.length };
+      snapshot: snapshotRows[0] ?? null, observations: observationRows,
+      documentCount: documentRows.length, generalDocumentCount: generalDocuments.length };
   }));
   return NextResponse.json({ periods: history });
 }

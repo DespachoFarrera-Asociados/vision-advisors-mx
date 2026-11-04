@@ -83,21 +83,36 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   const actor = await requireAdmin(request);
   if (!actor) return forbidden();
-  const body = (await request.json()) as { id?: string; status?: "draft" | "published" };
-  if (!body.id || !["draft", "published"].includes(body.status ?? "")) return NextResponse.json({ message: "Solicitud inválida." }, { status: 400 });
+  const body = (await request.json()) as { id?: string; status?: "draft" | "published"; periodId?: string | null };
+  const updatesStatus = body.status !== undefined;
+  const updatesPeriod = Object.prototype.hasOwnProperty.call(body, "periodId");
+  if (!body.id || (!updatesStatus && !updatesPeriod) || (updatesStatus && !["draft", "published"].includes(body.status ?? ""))) {
+    return NextResponse.json({ message: "Solicitud inválida." }, { status: 400 });
+  }
   const db = getDb();
   const [document] = await db.select({ id: documents.id, organizationId: documents.organizationId, periodId: documents.periodId }).from(documents).where(eq(documents.id, body.id)).limit(1);
   if (!document) return NextResponse.json({ message: "El documento ya no existe." }, { status: 404 });
-  if (body.status === "published" && document.periodId) {
-    const [period] = await db.select({ status: fiscalPeriods.status }).from(fiscalPeriods).where(and(eq(fiscalPeriods.id, document.periodId), inArray(fiscalPeriods.status, ["published", "locked"]))).limit(1);
+  const nextPeriodId = updatesPeriod ? (body.periodId?.trim() || null) : document.periodId;
+  if (nextPeriodId) {
+    const [targetPeriod] = await db.select({ organizationId: fiscalPeriods.organizationId }).from(fiscalPeriods).where(eq(fiscalPeriods.id, nextPeriodId)).limit(1);
+    if (!targetPeriod || targetPeriod.organizationId !== document.organizationId) {
+      return NextResponse.json({ message: "El periodo seleccionado no pertenece a la empresa del documento." }, { status: 400 });
+    }
+  }
+  const nextStatus = updatesStatus ? body.status! : undefined;
+  if (nextStatus === "published" && nextPeriodId) {
+    const [period] = await db.select({ status: fiscalPeriods.status }).from(fiscalPeriods).where(and(eq(fiscalPeriods.id, nextPeriodId), inArray(fiscalPeriods.status, ["published", "locked"]))).limit(1);
     if (!period) return NextResponse.json({ message: "Publique primero el periodo vinculado a este documento." }, { status: 409 });
   }
   const now = new Date().toISOString();
+  const updateValues = updatesStatus
+    ? { periodId: nextPeriodId, status: nextStatus, publishedAt: nextStatus === "published" ? now : null, publishedBy: nextStatus === "published" ? actor.id : null }
+    : { periodId: nextPeriodId };
   await db.batch([
-    db.update(documents).set({ status: body.status, publishedAt: body.status === "published" ? now : null, publishedBy: body.status === "published" ? actor.id : null }).where(eq(documents.id, document.id)),
-    db.insert(auditEvents).values({ id: `aud_${crypto.randomUUID()}`, actorUserId: actor.id, organizationId: document.organizationId, action: body.status === "published" ? "document.published" : "document.unpublished", entityType: "document", entityId: document.id, createdAt: now }),
+    db.update(documents).set(updateValues).where(eq(documents.id, document.id)),
+    db.insert(auditEvents).values({ id: `aud_${crypto.randomUUID()}`, actorUserId: actor.id, organizationId: document.organizationId, action: updatesStatus ? (nextStatus === "published" ? "document.published" : "document.unpublished") : "document.period.updated", entityType: "document", entityId: document.id, metadataJson: JSON.stringify({ periodId: nextPeriodId }), createdAt: now }),
   ]);
-  return NextResponse.json({ message: body.status === "published" ? "Documento publicado al cliente." : "Documento retirado del portal y conservado como borrador." });
+  return NextResponse.json({ message: updatesStatus ? (nextStatus === "published" ? "Documento publicado al cliente." : "Documento retirado del portal y conservado como borrador.") : "Periodo del documento actualizado." });
 }
 
 export async function DELETE(request: Request) {
