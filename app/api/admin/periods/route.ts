@@ -119,12 +119,19 @@ export async function PUT(request: Request) {
     incomeYtdCents?: number;
     deductionsMonthCents?: number;
     deductionsYtdCents?: number;
+    vatTransferredCents?: number;
+    vatCreditableCents?: number;
+    vatWithheldCents?: number;
+    issuedCfdiCount?: number;
+    receivedCfdiCount?: number;
+    paymentDueDate?: string | null;
+    filingStatus?: "determined" | "filed" | "paid";
     estimatedResultCents?: number;
     executiveSummary?: string;
     observation?: string;
     taxes?: Partial<Record<(typeof taxTypes)[number], number>>;
   };
-  const amounts = [body.incomeMonthCents, body.incomeYtdCents, body.deductionsMonthCents, body.deductionsYtdCents];
+  const amounts = [body.incomeMonthCents, body.incomeYtdCents, body.deductionsMonthCents, body.deductionsYtdCents, body.vatTransferredCents, body.vatCreditableCents, body.vatWithheldCents];
   if (!body.periodId || amounts.some((amount) => !validCents(amount)) || !Number.isInteger(body.healthScore) || Number(body.healthScore) < 0 || Number(body.healthScore) > 100) {
     return NextResponse.json({ message: "Revise las cantidades y el indicador de salud." }, { status: 400 });
   }
@@ -133,10 +140,20 @@ export async function PUT(request: Request) {
   if (!rawSummary || rawSummary.length > 1800 || !healthLabel || healthLabel.length > 80) {
     return NextResponse.json({ message: "Capture un resumen ejecutivo y una evaluación válidos." }, { status: 400 });
   }
+  if (![body.issuedCfdiCount, body.receivedCfdiCount].every((value) => Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 100_000) || !["determined", "filed", "paid"].includes(body.filingStatus || "")) {
+    return NextResponse.json({ message: "Revise los CFDI y el estado de la declaración." }, { status: 400 });
+  }
+  if (body.paymentDueDate && !/^\d{4}-\d{2}-\d{2}$/.test(body.paymentDueDate)) {
+    return NextResponse.json({ message: "La fecha límite de pago no es válida." }, { status: 400 });
+  }
   for (const taxType of taxTypes) {
     if (!validCents(body.taxes?.[taxType] ?? 0)) {
       return NextResponse.json({ message: `El importe de ${taxType} no es válido.` }, { status: 400 });
     }
+  }
+  const calculatedVat = Math.max(0, Number(body.vatTransferredCents) - Number(body.vatCreditableCents) - Number(body.vatWithheldCents));
+  if (body.taxes?.IVA !== calculatedVat) {
+    return NextResponse.json({ message: "El IVA a cargo no coincide con el cálculo del sistema." }, { status: 400 });
   }
 
   const db = getDb();
@@ -158,6 +175,13 @@ export async function PUT(request: Request) {
     incomeYtdCents: Number(body.incomeYtdCents),
     deductionsMonthCents: Number(body.deductionsMonthCents),
     deductionsYtdCents: Number(body.deductionsYtdCents),
+    vatTransferredCents: Number(body.vatTransferredCents),
+    vatCreditableCents: Number(body.vatCreditableCents),
+    vatWithheldCents: Number(body.vatWithheldCents),
+    issuedCfdiCount: Number(body.issuedCfdiCount),
+    receivedCfdiCount: Number(body.receivedCfdiCount),
+    paymentDueDate: body.paymentDueDate || null,
+    filingStatus: body.filingStatus!,
     estimatedResultCents: result,
     estimatedMarginBasisPoints: margin,
     executiveSummary: summary,
@@ -169,6 +193,8 @@ export async function PUT(request: Request) {
       healthScore: Number(body.healthScore), healthLabel, incomeMonthCents: income,
       incomeYtdCents: Number(body.incomeYtdCents), deductionsMonthCents: Number(body.deductionsMonthCents),
       deductionsYtdCents: Number(body.deductionsYtdCents), estimatedResultCents: result,
+      vatTransferredCents: Number(body.vatTransferredCents), vatCreditableCents: Number(body.vatCreditableCents), vatWithheldCents: Number(body.vatWithheldCents),
+      issuedCfdiCount: Number(body.issuedCfdiCount), receivedCfdiCount: Number(body.receivedCfdiCount), paymentDueDate: body.paymentDueDate || null, filingStatus: body.filingStatus!,
       estimatedMarginBasisPoints: margin, executiveSummary: summary, updatedAt: now,
     },
   });
@@ -178,7 +204,7 @@ export async function PUT(request: Request) {
     const amount = body.taxes?.[taxType] ?? 0;
     await db.insert(taxSummaries).values({
       id: `tax_${crypto.randomUUID()}`, periodId: period.id, taxType, amountCents: amount,
-      status: "estimated", createdAt: now, updatedAt: now,
+      status: body.filingStatus === "determined" ? "determined" : body.filingStatus, dueDate: body.paymentDueDate || null, createdAt: now, updatedAt: now,
     });
   }
 
@@ -207,8 +233,10 @@ export async function PATCH(request: Request) {
   const db = getDb();
   const [period] = await db.select().from(fiscalPeriods).where(eq(fiscalPeriods.id, body.periodId)).limit(1);
   if (!period) return NextResponse.json({ message: "El periodo no existe." }, { status: 404 });
-  const [snapshot] = await db.select({ id: monthlySnapshots.id }).from(monthlySnapshots).where(eq(monthlySnapshots.periodId, period.id)).limit(1);
+  if (period.status !== "review") return NextResponse.json({ message: "El periodo debe estar en revisión antes de publicarse." }, { status: 409 });
+  const [snapshot] = await db.select({ id: monthlySnapshots.id, paymentDueDate: monthlySnapshots.paymentDueDate }).from(monthlySnapshots).where(eq(monthlySnapshots.periodId, period.id)).limit(1);
   if (!snapshot) return NextResponse.json({ message: "Guarde la información del periodo antes de publicarlo." }, { status: 409 });
+  if (!snapshot.paymentDueDate) return NextResponse.json({ message: "Capture la fecha límite de pago antes de publicar." }, { status: 409 });
 
   const today = new Date();
   const periodStart = Date.UTC(period.year, period.month - 1, 1);

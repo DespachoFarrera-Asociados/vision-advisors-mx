@@ -21,8 +21,8 @@ type Organization = {
 type Period = { id: string; organizationId: string; year: number; month: number; status: "draft" | "review" | "published" | "locked"; publishedAt: string | null; updatedAt: string };
 type PeriodDetail = {
   period: Period;
-  snapshot: null | { healthScore: number; healthLabel: string; incomeMonthCents: number; incomeYtdCents: number; deductionsMonthCents: number; deductionsYtdCents: number; estimatedResultCents: number; executiveSummary: string };
-  taxes: { taxType: string; amountCents: number }[];
+  snapshot: null | { healthScore: number; healthLabel: string; incomeMonthCents: number; incomeYtdCents: number; deductionsMonthCents: number; deductionsYtdCents: number; vatTransferredCents: number; vatCreditableCents: number; vatWithheldCents: number; issuedCfdiCount: number; receivedCfdiCount: number; paymentDueDate: string | null; filingStatus: "determined" | "filed" | "paid"; estimatedResultCents: number; executiveSummary: string };
+  taxes: { taxType: string; amountCents: number; status: string; dueDate: string | null }[];
   observations: { detail: string }[];
 };
 type Client = {
@@ -262,14 +262,16 @@ export default function AdminPortal() {
     setBusy(true); setMessage("");
     const form = new FormData(event.currentTarget);
     const pesos = (name: string) => Math.round(parseMoney(String(form.get(name) || "0")) * 100);
+    const vatPayableCents = Math.max(0, pesos("vatTransferred") - pesos("vatCreditable") - pesos("vatWithheld"));
     const response = await fetch("/api/admin/periods", {
       method: "PUT",
       headers: { authorization: `Bearer ${tokenRef.current}`, "content-type": "application/json" },
       body: JSON.stringify({
         periodId: selectedPeriod, healthScore: Number(form.get("healthScore")), healthLabel: form.get("healthLabel"),
         incomeMonthCents: pesos("incomeMonth"), incomeYtdCents: pesos("incomeYtd"), deductionsMonthCents: pesos("deductionsMonth"),
-        deductionsYtdCents: pesos("deductionsYtd"), executiveSummary: form.get("executiveSummary"),
-        observation: form.get("observation"), taxes: { ISR: pesos("ISR"), IVA: pesos("IVA"), IMSS: pesos("IMSS"), INFONAVIT: pesos("INFONAVIT"), ISN: pesos("ISN") },
+        deductionsYtdCents: pesos("deductionsYtd"), vatTransferredCents: pesos("vatTransferred"), vatCreditableCents: pesos("vatCreditable"), vatWithheldCents: pesos("vatWithheld"),
+        issuedCfdiCount: Number(form.get("issuedCfdiCount")), receivedCfdiCount: Number(form.get("receivedCfdiCount")), paymentDueDate: form.get("paymentDueDate") || null, filingStatus: form.get("filingStatus"), executiveSummary: form.get("executiveSummary"),
+        observation: form.get("observation"), taxes: { ISR: pesos("ISR"), IVA: vatPayableCents, IMSS: pesos("IMSS"), INFONAVIT: pesos("INFONAVIT"), ISN: pesos("ISN") },
       }),
     });
     const data = (await response.json()) as { message?: string };
@@ -453,12 +455,18 @@ function PeriodForm({ detail, busy, message, onSubmit, onPublish }: { detail: Pe
   const locked = detail.period.status === "locked";
   const [incomeMonth, setIncomeMonth] = useState((snapshot?.incomeMonthCents || 0) / 100);
   const [deductionsMonth, setDeductionsMonth] = useState((snapshot?.deductionsMonthCents || 0) / 100);
+  const [vatTransferred, setVatTransferred] = useState((snapshot?.vatTransferredCents || 0) / 100);
+  const [vatCreditable, setVatCreditable] = useState((snapshot?.vatCreditableCents || 0) / 100);
+  const [vatWithheld, setVatWithheld] = useState((snapshot?.vatWithheldCents || 0) / 100);
   const calculatedResult = incomeMonth - deductionsMonth;
+  const calculatedVat = Math.max(0, vatTransferred - vatCreditable - vatWithheld);
   return <form className="editor-form" onSubmit={onSubmit}>
     <div className="editor-status"><span className={`status-${detail.period.status}`}>{statusLabel(detail.period.status)}</span>{detail.period.publishedAt && <small>Publicado: {new Date(detail.period.publishedAt).toLocaleString("es-MX")}</small>}</div>
     <fieldset disabled={busy || locked}><legend>Indicador ejecutivo</legend><div className="field-grid two"><label>Salud financiera (0 a 100)<input name="healthScore" type="number" min="0" max="100" required defaultValue={snapshot?.healthScore ?? 70}/></label><label>Evaluación<input name="healthLabel" required maxLength={80} defaultValue={snapshot?.healthLabel ?? "Estable con áreas de atención"}/></label></div></fieldset>
     <fieldset disabled={busy || locked}><legend>Información contable · MXN</legend><div className="field-grid"><Money name="incomeMonth" label="Ingresos del mes" value={amount(snapshot?.incomeMonthCents)} onValueChange={setIncomeMonth}/><Money name="incomeYtd" label="Ingresos acumulados" value={amount(snapshot?.incomeYtdCents)}/><Money name="deductionsMonth" label="Deducciones del mes" value={amount(snapshot?.deductionsMonthCents)} onValueChange={setDeductionsMonth}/><Money name="deductionsYtd" label="Deducciones acumuladas" value={amount(snapshot?.deductionsYtdCents)}/><label>Resultado calculado<span className="money-input calculated"><span aria-hidden="true">$</span><input type="text" readOnly value={formatMoney(calculatedResult)} aria-label="Resultado calculado en pesos mexicanos"/></span></label></div></fieldset>
-    <fieldset disabled={busy || locked}><legend>Impuestos y contribuciones estimados · MXN</legend><div className="field-grid five">{["ISR","IVA","IMSS","INFONAVIT","ISN"].map((type) => <Money key={type} name={type} label={type} value={tax(type)}/>)}</div></fieldset>
+    <fieldset disabled={busy || locked}><legend>Determinación de IVA · MXN</legend><div className="field-grid"><Money name="vatTransferred" label="IVA trasladado" value={amount(snapshot?.vatTransferredCents)} onValueChange={setVatTransferred}/><Money name="vatCreditable" label="IVA acreditable" value={amount(snapshot?.vatCreditableCents)} onValueChange={setVatCreditable}/><Money name="vatWithheld" label="IVA retenido" value={amount(snapshot?.vatWithheldCents)} onValueChange={setVatWithheld}/><label>IVA a cargo calculado<span className="money-input calculated"><span aria-hidden="true">$</span><input type="text" readOnly value={formatMoney(calculatedVat)} aria-label="IVA a cargo calculado"/></span></label></div></fieldset>
+    <fieldset disabled={busy || locked}><legend>Impuestos y contribuciones estimados · MXN</legend><div className="field-grid five"><Money name="ISR" label="ISR" value={tax("ISR")}/><label>IVA calculado<span className="money-input calculated"><span aria-hidden="true">$</span><input type="text" readOnly value={formatMoney(calculatedVat)} aria-label="IVA calculado"/></span></label>{["IMSS","INFONAVIT","ISN"].map((type) => <Money key={type} name={type} label={type} value={tax(type)}/>)}</div></fieldset>
+    <fieldset disabled={busy || locked}><legend>Control de declaración</legend><div className="field-grid"><label>CFDI emitidos<input name="issuedCfdiCount" type="number" min="0" max="100000" required defaultValue={snapshot?.issuedCfdiCount ?? 0}/></label><label>CFDI recibidos<input name="receivedCfdiCount" type="number" min="0" max="100000" required defaultValue={snapshot?.receivedCfdiCount ?? 0}/></label><label>Fecha límite de pago<input name="paymentDueDate" type="date" defaultValue={snapshot?.paymentDueDate || ""}/></label><label>Estado de la declaración<select name="filingStatus" defaultValue={snapshot?.filingStatus || "determined"}><option value="determined">Determinada</option><option value="filed">Presentada</option><option value="paid">Pagada</option></select></label></div></fieldset>
     <fieldset disabled={busy || locked}><legend>Lectura ejecutiva</legend><label>Resumen para el cliente<textarea name="executiveSummary" required maxLength={1800} defaultValue={snapshot?.executiveSummary ?? ""} placeholder="Explique los resultados del periodo de forma clara y accionable."/></label><label>Observación o acción sugerida<textarea name="observation" maxLength={1600} defaultValue={detail.observations[0]?.detail ?? ""} placeholder="Señale riesgos, pendientes o recomendaciones específicas."/></label></fieldset>
     <div className="editor-actions"><button type="submit" disabled={busy || locked}>{busy ? "Procesando…" : "Guardar para revisión"}</button><button className="publish" type="button" disabled={busy || locked || !snapshot || detail.period.status !== "review"} onClick={onPublish}>Publicar al cliente</button></div>
     {message && <div className="editor-feedback" role="status">{message}</div>}
