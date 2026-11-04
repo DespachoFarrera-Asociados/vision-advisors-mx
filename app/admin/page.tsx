@@ -3,6 +3,7 @@
 import { Auth0Client, type User } from "@auth0/auth0-spa-js";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import "./admin.css";
+import "./admin-remodel.css";
 
 const auth0Domain = "visionadvisorslatam.us.auth0.com";
 const auth0ClientId = "2ugfLDMQWdghmyfw9Ml0g0UG4uVBRC7Y";
@@ -59,6 +60,7 @@ export default function AdminPortal() {
   const [clients, setClients] = useState<Client[]>([]);
   const [selectedClient, setSelectedClient] = useState("");
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const loadOrganizations = useCallback(async (token: string, markReady = true) => {
     const response = await fetch("/api/admin/organizations", {
@@ -323,18 +325,18 @@ export default function AdminPortal() {
   if (screen === "error") return <Gate title="Panel no disponible" copy={message} action="Volver al sitio" href="/"/>;
 
   return <main className="admin-shell">
-    <aside className="admin-sidebar">
+    <aside className={`admin-sidebar${menuOpen ? " open" : ""}`}>
       <Brand/>
-      <p>CONTROL INTERNO</p>
-      <nav><a className="active" href="#empresas">Empresas</a><a href="#periodos">Periodos mensuales</a><a href="#clientes">Clientes</a><a href="#documentos">Documentos</a></nav>
+      <p>PANEL DEL DESPACHO</p>
+      <nav><a className="active" href="#clientes" onClick={() => setMenuOpen(false)}>Clientes</a><a href="#documentos" onClick={() => setMenuOpen(false)}>Cargar documentos</a><a href="#periodos" onClick={() => setMenuOpen(false)}>Publicar periodo</a><a href="#empresas" onClick={() => setMenuOpen(false)}>Empresas</a></nav>
       <button onClick={signOut}>Cerrar sesión</button>
     </aside>
     <section className="admin-workspace">
-      <header><div><small>SESIÓN DEL DESPACHO</small><b>{user?.email}</b></div><span>{(user?.email || "VA").slice(0, 2).toUpperCase()}</span></header>
+      <header><button className="admin-menu" type="button" aria-label="Abrir menú" onClick={() => setMenuOpen((value) => !value)}>☰</button><p>Portal Vision / <b>Panel del despacho</b></p><div><small>SESIÓN DEL DESPACHO</small><b>{user?.email}</b></div><span>{(user?.email || "VA").slice(0, 2).toUpperCase()}</span></header>
       <div className="admin-content">
-        <p className="admin-kicker">VISION ADVISORS · ADMINISTRACIÓN</p>
-        <h1>Expedientes bajo control.</h1>
-        <p className="admin-lead">Registre empresas y prepare sus periodos mensuales. Nada será visible para el cliente hasta que el despacho lo publique.</p>
+        <p className="admin-kicker">PANEL DEL DESPACHO</p>
+        <h1>Clientes y operación.</h1>
+        <p className="admin-lead">Administre expedientes, documentos y periodos publicados desde un solo lugar.</p>
         {message && <div className="admin-message" role="status">{message}</div>}
 
         <section className="admin-grid" id="empresas">
