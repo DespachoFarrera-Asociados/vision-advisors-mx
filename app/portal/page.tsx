@@ -38,6 +38,13 @@ type HistoryPeriod = { id: string; year: number; month: number; publishedAt: str
 type PortalMessage = { id: string; subject: string; body: string; type: "informative" | "action" | "urgent"; dueDate: string | null; documentId: string | null; readAt: string | null; createdAt: string };
 type PortalBootstrap = { summary: PortalData; documents: { documents: PortalDocument[] }; history: { periods: HistoryPeriod[] }; messages: { messages: PortalMessage[] } };
 
+function withTimeout<T>(promise: Promise<T>, milliseconds: number, message: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => window.setTimeout(() => reject(new Error(message)), milliseconds)),
+  ]);
+}
+
 async function fetchProtected(url: string, accessToken: string) {
   let response: Response | undefined;
   for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -77,7 +84,10 @@ export default function ClientPortal() {
           domain: auth0Domain,
           clientId: auth0ClientId,
           authorizationParams: { redirect_uri: redirectUri, ui_locales: "es-MX es" },
-          cacheLocation: "memory",
+          // Persist the Auth0 cache across reloads. With an in-memory cache every
+          // refresh started a new hidden-session check; when that iframe stalled,
+          // React could remain in its bootstrap state until another refresh.
+          cacheLocation: "localstorage",
           useRefreshTokens: false,
         });
         authRef.current = client;
@@ -91,18 +101,23 @@ export default function ClientPortal() {
           }
           window.history.replaceState({}, document.title, "/portal");
         } else {
-          await client.checkSession();
+          try {
+            await withTimeout(client.checkSession(), 8_000, "La sesión tardó demasiado en responder.");
+          } catch {
+            // A failed silent check means there is no reusable session. Showing
+            // the sign-in screen is deterministic and avoids a blank workspace.
+          }
         }
 
         const authenticated = await client.isAuthenticated();
         if (!active) return;
         if (authenticated) {
-          setUser(await client.getUser());
-          const accessToken = await client.getTokenSilently();
+          setUser(await withTimeout(client.getUser(), 5_000, "No fue posible leer el perfil."));
+          const accessToken = await withTimeout(client.getTokenSilently(), 10_000, "No fue posible recuperar la sesión segura.");
           tokenRef.current = accessToken;
           // Load the private workspace through one server request. This avoids
           // repeating Auth0 validation for summary, files, history and notices.
-          const bootstrapResponse = await fetchProtected("/api/portal/bootstrap", accessToken);
+          const bootstrapResponse = await withTimeout(fetchProtected("/api/portal/bootstrap", accessToken), 12_000, "El portal tardó demasiado en cargar.");
           if (!bootstrapResponse.ok) throw new Error("No fue posible cargar el espacio privado.");
           const bootstrap = (await bootstrapResponse.json()) as PortalBootstrap;
           setPortalData(bootstrap.summary);
