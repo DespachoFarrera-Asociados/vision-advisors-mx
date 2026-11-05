@@ -42,6 +42,33 @@ function arrayOrEmpty<T>(value: unknown): T[] {
   return Array.isArray(value) ? value as T[] : [];
 }
 
+function safeNumber(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function safeIsoDate(value: unknown): string | null {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}(?:$|T)/.test(value) ? value : null;
+}
+
+function normalizeSnapshot(snapshot: PortalData["snapshot"]): PortalData["snapshot"] {
+  if (!snapshot || typeof snapshot !== "object") return null;
+  return {
+    ...snapshot,
+    incomeMonthCents: safeNumber(snapshot.incomeMonthCents),
+    incomeYtdCents: safeNumber(snapshot.incomeYtdCents),
+    deductionsMonthCents: safeNumber(snapshot.deductionsMonthCents),
+    deductionsYtdCents: safeNumber(snapshot.deductionsYtdCents),
+    estimatedResultCents: safeNumber(snapshot.estimatedResultCents),
+    vatTransferredCents: safeNumber(snapshot.vatTransferredCents),
+    vatCreditableCents: safeNumber(snapshot.vatCreditableCents),
+    vatWithheldCents: safeNumber(snapshot.vatWithheldCents),
+    issuedCfdiCount: safeNumber(snapshot.issuedCfdiCount),
+    receivedCfdiCount: safeNumber(snapshot.receivedCfdiCount),
+    paymentDueDate: safeIsoDate(snapshot.paymentDueDate),
+  };
+}
+
 function normalizeBootstrap(value: unknown): PortalBootstrap {
   const source = value && typeof value === "object" ? value as Partial<PortalBootstrap> : {};
   const summary = source.summary && typeof source.summary === "object"
@@ -49,13 +76,14 @@ function normalizeBootstrap(value: unknown): PortalBootstrap {
     : { status: "unavailable" as const, message: "No fue posible consultar el resumen." };
   const periods = arrayOrEmpty<HistoryPeriod>(source.history?.periods).map((period) => ({
     ...period,
+    snapshot: normalizeSnapshot(period?.snapshot),
     taxes: arrayOrEmpty(period?.taxes),
     observations: arrayOrEmpty(period?.observations),
     documentCount: Number(period?.documentCount) || 0,
     generalDocumentCount: Number(period?.generalDocumentCount) || 0,
   }));
   return {
-    summary: { ...summary, taxes: arrayOrEmpty(summary.taxes) },
+    summary: { ...summary, snapshot: normalizeSnapshot(summary.snapshot), taxes: arrayOrEmpty(summary.taxes) },
     documents: { documents: arrayOrEmpty(source.documents?.documents) },
     history: { periods },
     messages: { messages: arrayOrEmpty(source.messages?.messages) },
@@ -294,6 +322,7 @@ function deadlineMeta(date?: string | null, status?: string): DeadlineMeta {
   if (status === "paid") return { tone: "paid", label: "Obligación pagada" };
   if (!date) return { tone: "pending", label: "Fecha pendiente" };
   const due = new Date(`${date.slice(0, 10)}T23:59:59Z`).getTime();
+  if (!Number.isFinite(due)) return { tone: "pending", label: "Fecha pendiente" };
   const remainingDays = Math.ceil((due - Date.now()) / 86_400_000);
   if (remainingDays < 0) return { tone: "overdue", label: `Vencida hace ${Math.abs(remainingDays)} día${remainingDays === -1 ? "" : "s"}` };
   if (remainingDays <= 7) return { tone: "soon", label: remainingDays === 0 ? "Vence hoy" : `Vence en ${remainingDays} días` };
