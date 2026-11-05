@@ -37,6 +37,16 @@ type PortalDocument = { id: string; title: string; category: string; fiscalType:
 type HistoryPeriod = { id: string; year: number; month: number; publishedAt: string | null; snapshot: PortalData["snapshot"]; taxes: { taxType: string; amountCents: number; status: string; dueDate: string | null }[]; observations: { title: string; detail: string }[]; documentCount: number; generalDocumentCount: number };
 type PortalMessage = { id: string; subject: string; body: string; type: "informative" | "action" | "urgent"; dueDate: string | null; documentId: string | null; readAt: string | null; createdAt: string };
 
+async function fetchProtected(url: string, accessToken: string) {
+  let response: Response | undefined;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    response = await fetch(url, { headers: { authorization: `Bearer ${accessToken}` }, cache: "no-store" });
+    if (response.ok || ![429, 500, 502, 503, 504].includes(response.status)) return response;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return response!;
+}
+
 export default function ClientPortal() {
   const authRef = useRef<Auth0Client | null>(null);
   const tokenRef = useRef("");
@@ -53,6 +63,11 @@ export default function ClientPortal() {
 
   useEffect(() => {
     let active = true;
+    const watchdog = window.setTimeout(() => {
+      if (!active) return;
+      setError("La validación está tardando más de lo esperado. Recargue la página para reintentar.");
+      setState("error");
+    }, 15_000);
 
     async function initializeAuth() {
       try {
@@ -87,19 +102,19 @@ export default function ClientPortal() {
           // Auth0 can throttle simultaneous /userinfo validations for the same
           // token. Load each protected resource in sequence so all three APIs
           // resolve the same portal identity reliably.
-          const portalResponse = await fetch("/api/portal/summary", { headers: { authorization: `Bearer ${accessToken}` }, cache: "no-store" });
+          const portalResponse = await fetchProtected("/api/portal/summary", accessToken);
           if (portalResponse.ok || portalResponse.status === 503) {
             setPortalData((await portalResponse.json()) as PortalData);
           }
-          const documentResponse = await fetch("/api/portal/documents", { headers: { authorization: `Bearer ${accessToken}` }, cache: "no-store" });
+          const documentResponse = await fetchProtected("/api/portal/documents", accessToken);
           if (documentResponse.ok) setDocuments(((await documentResponse.json()) as { documents: PortalDocument[] }).documents);
-          const historyResponse = await fetch("/api/portal/history", { headers: { authorization: `Bearer ${accessToken}` }, cache: "no-store" });
+          const historyResponse = await fetchProtected("/api/portal/history", accessToken);
           if (historyResponse.ok) {
             const periodRows = ((await historyResponse.json()) as { periods: HistoryPeriod[] }).periods;
             setHistory(periodRows);
             setAccountingPeriodId(periodRows[0]?.id || "");
           }
-          const messageResponse = await fetch("/api/portal/messages", { headers: { authorization: `Bearer ${accessToken}` }, cache: "no-store" });
+          const messageResponse = await fetchProtected("/api/portal/messages", accessToken);
           if (messageResponse.ok) setMessages(((await messageResponse.json()) as { messages: PortalMessage[] }).messages);
           setState("authenticated");
         } else {
@@ -112,8 +127,8 @@ export default function ClientPortal() {
       }
     }
 
-    void initializeAuth();
-    return () => { active = false; };
+    void initializeAuth().finally(() => window.clearTimeout(watchdog));
+    return () => { active = false; window.clearTimeout(watchdog); };
   }, []);
 
   async function signIn() {

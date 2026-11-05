@@ -166,10 +166,15 @@ export default function AdminPortal() {
         if (!schemaReady || !active) return;
         const authorized = await loadOrganizations(token, false);
         if (!authorized || !active) return;
-        await loadClients();
-        await loadDocuments();
-        await loadNotices();
-        if (active) setScreen("ready");
+        setScreen("ready");
+        const secondaryLoads = await Promise.allSettled([loadClients(), loadDocuments(), loadNotices()]);
+        if (!active) return;
+        const failedModules = secondaryLoads
+          .map((result, index) => result.status === "rejected" ? ["clientes", "documentos", "avisos"][index] : null)
+          .filter(Boolean);
+        if (failedModules.length) {
+          setMessage(`El panel está disponible, pero no fue posible actualizar temporalmente: ${failedModules.join(", ")}. Recargue la página para reintentar.`);
+        }
       } catch (error) {
         if (!active) return;
         setMessage(error instanceof Error ? error.message : "No fue posible iniciar el panel.");
