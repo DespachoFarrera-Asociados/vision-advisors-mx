@@ -69,6 +69,10 @@ function normalizeSnapshot(snapshot: PortalData["snapshot"]): PortalData["snapsh
   };
 }
 
+function normalizeTaxes<T extends { amountCents: number }>(taxes: unknown): T[] {
+  return arrayOrEmpty<T>(taxes).map((tax) => ({ ...tax, amountCents: safeNumber(tax?.amountCents) }));
+}
+
 function normalizeBootstrap(value: unknown): PortalBootstrap {
   const source = value && typeof value === "object" ? value as Partial<PortalBootstrap> : {};
   const summary = source.summary && typeof source.summary === "object"
@@ -77,13 +81,13 @@ function normalizeBootstrap(value: unknown): PortalBootstrap {
   const periods = arrayOrEmpty<HistoryPeriod>(source.history?.periods).map((period) => ({
     ...period,
     snapshot: normalizeSnapshot(period?.snapshot),
-    taxes: arrayOrEmpty(period?.taxes),
+    taxes: normalizeTaxes<HistoryPeriod["taxes"][number]>(period?.taxes),
     observations: arrayOrEmpty(period?.observations),
     documentCount: Number(period?.documentCount) || 0,
     generalDocumentCount: Number(period?.generalDocumentCount) || 0,
   }));
   return {
-    summary: { ...summary, snapshot: normalizeSnapshot(summary.snapshot), taxes: arrayOrEmpty(summary.taxes) },
+    summary: { ...summary, snapshot: normalizeSnapshot(summary.snapshot), taxes: normalizeTaxes<NonNullable<PortalData["taxes"]>[number]>(summary.taxes) },
     documents: { documents: arrayOrEmpty(source.documents?.documents) },
     history: { periods },
     messages: { messages: arrayOrEmpty(source.messages?.messages) },
