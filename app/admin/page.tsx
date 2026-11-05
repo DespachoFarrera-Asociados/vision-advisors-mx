@@ -48,6 +48,7 @@ type DocumentItem = {
 };
 
 type Screen = "loading" | "anonymous" | "forbidden" | "ready" | "error";
+type BatchRow = { file: File; rfc: string | null; organization: Organization | null; result?: string; ok?: boolean };
 
 export default function AdminPortal() {
   const authRef = useRef<Auth0Client | null>(null);
@@ -65,6 +66,7 @@ export default function AdminPortal() {
   const [selectedClient, setSelectedClient] = useState("");
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [batchRows, setBatchRows] = useState<BatchRow[]>([]);
 
   const loadOrganizations = useCallback(async (token: string, markReady = true) => {
     const response = await fetch("/api/admin/organizations", {
@@ -164,6 +166,40 @@ export default function AdminPortal() {
     setMessage(data.message || (response.ok ? "Documento cargado." : "No fue posible cargar el documento."));
     if (response.ok) { formElement.reset(); await loadDocuments(); }
     setBusy(false);
+  }
+
+  async function prepareBatch(files: FileList | null) {
+    const selected = Array.from(files || []).slice(0, 50);
+    const rows = await Promise.all(selected.map(async (file) => {
+      const nameRfc = file.name.toUpperCase().match(/[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}/)?.[0];
+      const content = nameRfc ? null : new TextDecoder("latin1").decode(await file.arrayBuffer()).toUpperCase().match(/[A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3}/)?.[0];
+      const rfc = nameRfc || content || null;
+      return { file, rfc, organization: organizations.find((item) => item.rfc === rfc) || null };
+    }));
+    setBatchRows(rows);
+  }
+
+  async function uploadBatch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!batchRows.length) return;
+    setBusy(true); setMessage("");
+    const settings = new FormData(event.currentTarget);
+    const fiscalType = String(settings.get("batchFiscalType") || "opinion");
+    const results: BatchRow[] = [];
+    for (const row of batchRows) {
+      if (!row.organization) { results.push({ ...row, result: "No existe una empresa con el RFC detectado.", ok: false }); continue; }
+      const payload = new FormData();
+      payload.set("file", row.file); payload.set("organizationId", row.organization.id); payload.set("title", `${fiscalType === "csf" ? "Constancia de Situación Fiscal" : "Opinión de cumplimiento"} · ${row.organization.tradeName}`);
+      payload.set("category", "tax"); payload.set("fiscalType", fiscalType); payload.set("issueDate", String(settings.get("batchIssueDate") || "")); payload.set("opinionSense", String(settings.get("batchOpinionSense") || ""));
+      if (settings.get("batchManualConfirmed") === "on") payload.set("manualConfirmed", "on");
+      try {
+        const response = await fetch("/api/admin/documents", { method: "POST", headers: { authorization: `Bearer ${tokenRef.current}` }, body: payload });
+        const data = (await response.json()) as { message?: string };
+        results.push({ ...row, result: data.message || (response.ok ? "Guardado" : "Error"), ok: response.ok });
+      } catch { results.push({ ...row, result: "No fue posible procesar el archivo.", ok: false }); }
+    }
+    setBatchRows(results); await loadDocuments();
+    setMessage(`Lote procesado: ${results.filter((item) => item.ok).length} guardados, ${results.filter((item) => !item.ok).length} con error.`); setBusy(false);
   }
 
   async function setDocumentStatus(id: string, status: "draft" | "published") {
@@ -430,6 +466,7 @@ export default function AdminPortal() {
             <label className="document-confirm"><input name="manualConfirmed" type="checkbox"/> Confirmo que el archivo pertenece al RFC seleccionado cuando el PDF no permita leerlo.</label>
             <button disabled={busy}>{busy ? "Procesando…" : "Cargar borrador"}</button>
           </form>
+          <details className="batch-upload"><summary>Carga masiva de CSF u opiniones</summary><form onSubmit={uploadBatch}><div className="batch-settings"><label>Tipo<select name="batchFiscalType" defaultValue="opinion"><option value="opinion">Opiniones de cumplimiento</option><option value="csf">Constancias de Situación Fiscal</option></select></label><label>Fecha de emisión<input name="batchIssueDate" type="date" required/></label><label>Sentido<select name="batchOpinionSense" defaultValue="positive"><option value="positive">Positiva</option><option value="negative">Negativa</option><option value="no_obligations">Sin obligaciones</option><option value="registered_no_obligations">Inscrito sin obligaciones</option></select></label><label>PDF del lote<input type="file" accept=".pdf,application/pdf" multiple required onChange={(event) => void prepareBatch(event.target.files)}/></label></div><label className="batch-confirm"><input name="batchManualConfirmed" type="checkbox"/> Confirmo manualmente los archivos que no permitan leer el RFC.</label>{batchRows.length > 0 && <div className="batch-table"><div><b>Archivo</b><b>RFC detectado</b><b>Empresa</b><b>Estado</b></div>{batchRows.map((row) => <div key={`${row.file.name}-${row.file.size}`}><span>{row.file.name}</span><span>{row.rfc || "No detectado"}</span><span>{row.organization?.tradeName || "Sin coincidencia"}</span><span className={row.ok === false ? "error" : row.ok ? "success" : ""}>{row.result || (row.organization ? "Listo" : "Requiere revisión")}</span></div>)}</div>}<button disabled={busy || !batchRows.length}>{busy ? "Procesando lote…" : "Publicar lote como borrador"}</button></form></details>
           <div className="document-list">
             {documents.map((item) => <article key={item.id}><div><b>{item.title}</b><small>{item.organizationName}{item.periodMonth ? ` · ${months[item.periodMonth - 1]} ${item.periodYear}` : " · Documento general"}</small><span>{documentCategory(item.category)} · {formatBytes(item.sizeBytes)}</span></div><label className="document-period">Periodo<select value={item.periodId || ""} disabled={busy || item.organizationId !== selectedOrganization} onChange={(event) => void updateDocumentPeriod(item.id, event.target.value)}><option value="">General / sin periodo</option>{periods.map((period) => <option key={period.id} value={period.id}>{months[period.month - 1]} {period.year}</option>)}</select></label><i className={`document-status ${item.status}`}>{item.status === "published" ? "Publicado" : "Borrador"}</i><div className="document-actions"><button type="button" onClick={() => void downloadDocument(item.id, item.title)}>Descargar</button><button type="button" disabled={busy} onClick={() => void setDocumentStatus(item.id, item.status === "published" ? "draft" : "published")}>{item.status === "published" ? "Retirar" : "Publicar"}</button><button className="danger" type="button" disabled={busy} onClick={() => void deleteDocument(item.id)}>Eliminar</button></div></article>)}
             {!documents.length && <p className="admin-empty">Todavía no hay documentos cargados.</p>}
