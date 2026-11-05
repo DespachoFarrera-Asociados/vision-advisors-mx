@@ -38,6 +38,30 @@ type HistoryPeriod = { id: string; year: number; month: number; publishedAt: str
 type PortalMessage = { id: string; subject: string; body: string; type: "informative" | "action" | "urgent"; dueDate: string | null; documentId: string | null; readAt: string | null; createdAt: string };
 type PortalBootstrap = { summary: PortalData; documents: { documents: PortalDocument[] }; history: { periods: HistoryPeriod[] }; messages: { messages: PortalMessage[] } };
 
+function arrayOrEmpty<T>(value: unknown): T[] {
+  return Array.isArray(value) ? value as T[] : [];
+}
+
+function normalizeBootstrap(value: unknown): PortalBootstrap {
+  const source = value && typeof value === "object" ? value as Partial<PortalBootstrap> : {};
+  const summary = source.summary && typeof source.summary === "object"
+    ? source.summary
+    : { status: "unavailable" as const, message: "No fue posible consultar el resumen." };
+  const periods = arrayOrEmpty<HistoryPeriod>(source.history?.periods).map((period) => ({
+    ...period,
+    taxes: arrayOrEmpty(period?.taxes),
+    observations: arrayOrEmpty(period?.observations),
+    documentCount: Number(period?.documentCount) || 0,
+    generalDocumentCount: Number(period?.generalDocumentCount) || 0,
+  }));
+  return {
+    summary: { ...summary, taxes: arrayOrEmpty(summary.taxes) },
+    documents: { documents: arrayOrEmpty(source.documents?.documents) },
+    history: { periods },
+    messages: { messages: arrayOrEmpty(source.messages?.messages) },
+  };
+}
+
 function withTimeout<T>(promise: Promise<T>, milliseconds: number, message: string): Promise<T> {
   return Promise.race([
     promise,
@@ -119,7 +143,7 @@ export default function ClientPortal() {
           // repeating Auth0 validation for summary, files, history and notices.
           const bootstrapResponse = await withTimeout(fetchProtected("/api/portal/bootstrap", accessToken), 12_000, "El portal tardó demasiado en cargar.");
           if (!bootstrapResponse.ok) throw new Error("No fue posible cargar el espacio privado.");
-          const bootstrap = (await bootstrapResponse.json()) as PortalBootstrap;
+          const bootstrap = normalizeBootstrap(await bootstrapResponse.json());
           setPortalData(bootstrap.summary);
           setDocuments(bootstrap.documents.documents);
           setMessages(bootstrap.messages.messages);
@@ -209,7 +233,7 @@ export default function ClientPortal() {
     </main>;
   }
 
-  const displayName = user?.name || user?.nickname || user?.email || "Cliente";
+  const displayName = String(user?.name || user?.nickname || user?.email || "Cliente");
   const unreadMessageCount = messages.filter((item) => !item.readAt).length;
   const isReady = portalData?.status === "ready" && portalData.snapshot;
   const portalMessage = portalData?.message || "El despacho está validando la asignación segura de su expediente.";
@@ -223,7 +247,7 @@ export default function ClientPortal() {
   const accountingTaxTotal = accountingPeriod?.taxes?.reduce((total, tax) => total + tax.amountCents, 0) || 0;
   const accountingDocuments = accountingPeriod ? documents.filter((item) => item.periodYear === accountingPeriod.year && item.periodMonth === accountingPeriod.month && ["tax", "accounting", "report"].includes(item.category)) : [];
   const vatDue = Math.max(0, (accountingPeriod?.snapshot?.vatTransferredCents || 0) - (accountingPeriod?.snapshot?.vatCreditableCents || 0) - (accountingPeriod?.snapshot?.vatWithheldCents || 0));
-  const publishedVat = accountingPeriod?.taxes?.find((tax) => tax.taxType.toUpperCase() === "IVA");
+  const publishedVat = accountingPeriod?.taxes?.find((tax) => String(tax?.taxType || "").toUpperCase() === "IVA");
   const resultReconciled = !accountingPeriod?.snapshot || accountingPeriod.snapshot.estimatedResultCents === accountingResult;
   const vatReconciled = !publishedVat || publishedVat.amountCents === vatDue;
   const declarationDeadline = deadlineMeta(accountingPeriod?.snapshot?.paymentDueDate, accountingPeriod?.snapshot?.filingStatus);
@@ -249,11 +273,12 @@ export default function ClientPortal() {
 }
 
 function formatMoney(cents: number) {
-  return new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(cents / 100);
+  const safeCents = Number.isFinite(Number(cents)) ? Number(cents) : 0;
+  return new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(safeCents / 100);
 }
 function documentCategory(category: string) { return ({ report: "Reporte", tax: "Fiscal", accounting: "Contable", legal: "Legal", other: "Otro" } as Record<string, string>)[category] || "Documento"; }
 function formatBytes(bytes: number) { return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`; }
-function formatShortDate(date: string) { return new Intl.DateTimeFormat("es-MX", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" }).format(new Date(date)); }
+function formatShortDate(date: string) { const parsed = new Date(date); return Number.isNaN(parsed.getTime()) ? "Fecha pendiente" : new Intl.DateTimeFormat("es-MX", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "UTC" }).format(parsed); }
 function taxStatus(status: string) { return ({ estimated: "Estimado", determined: "Determinado", filed: "Presentado", paid: "Pagado" } as Record<string, string>)[status] || "Estimado"; }
 function fiscalTypeLabel(type: string) { return ({ csf: "Constancia fiscal", opinion: "Opinión de cumplimiento", acuse: "Acuse o declaración", general: "Documento" } as Record<string, string>)[type] || "Documento"; }
 function opinionLabel(sense?: string | null) { return ({ positive: "Positiva", negative: "Negativa", no_obligations: "Sin obligaciones", registered_no_obligations: "Inscrito sin obligaciones" } as Record<string, string>)[sense || ""] || "Sin sentido registrado"; }
@@ -261,7 +286,7 @@ function filingStatusLabel(status?: string) { return ({ determined: "Declaració
 function variationLabel(current: number, previous?: number) { if (!previous) return "Sin comparativo anterior"; const variation = ((current - previous) / previous) * 100; return `${variation >= 0 ? "+" : ""}${variation.toFixed(1)}% contra el periodo anterior`; }
 function monthName(month?: number) { return month ? new Intl.DateTimeFormat("es-MX", { month: "long", timeZone: "UTC" }).format(new Date(Date.UTC(2026, month - 1, 1))).replace(/^./, (letter) => letter.toUpperCase()) : ""; }
 function formatDate(date: string) { return new Intl.DateTimeFormat("es-MX", { day: "2-digit", month: "long", year: "numeric" }).format(new Date(date)); }
-function publicationLabel(date: string, year: number, month: number) { const published = new Date(date); const periodStart = new Date(Date.UTC(year, month - 1, 1)); return published < periodStart ? `Publicación anticipada registrada el ${formatDate(date)}` : `Publicado el ${formatDate(date)}`; }
+function publicationLabel(date: string, year: number, month: number) { const published = new Date(date); if (Number.isNaN(published.getTime())) return "Periodo publicado"; const periodStart = new Date(Date.UTC(year, month - 1, 1)); return published < periodStart ? `Publicación anticipada registrada el ${formatDate(date)}` : `Publicado el ${formatDate(date)}`; }
 function alignPeriodSummary(summary: string, year?: number, month?: number) { if (!year || !month) return summary; return summary.replace(/\b(periodo\s+)(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)(\s+de)?\s+\d{4}\b/gi, (_match, prefix: string) => `${prefix}${monthName(month).toLowerCase()} ${year}`); }
 
 type DeadlineMeta = { tone: "paid" | "overdue" | "soon" | "current" | "pending"; label: string };
@@ -277,7 +302,7 @@ function deadlineMeta(date?: string | null, status?: string): DeadlineMeta {
 
 function AccountingReconciliation({ period, result, resultReconciled, vatDue, vatReconciled, deadline }: { period: HistoryPeriod; result: number; resultReconciled: boolean; vatDue: number; vatReconciled: boolean; deadline: DeadlineMeta }) {
   const snapshot = period.snapshot!;
-  const ivaPublished = period.taxes.find((tax) => tax.taxType.toUpperCase() === "IVA");
+  const ivaPublished = arrayOrEmpty<HistoryPeriod["taxes"][number]>(period.taxes).find((tax) => String(tax?.taxType || "").toUpperCase() === "IVA");
   return <section className="accounting-reconciliation" aria-label="Conciliación fiscal del periodo">
     <div className={`accounting-declaration ${deadline.tone}`}>
       <div><small>ESTADO DE LA DECLARACIÓN</small><b>{filingStatusLabel(snapshot.filingStatus)}</b></div>
