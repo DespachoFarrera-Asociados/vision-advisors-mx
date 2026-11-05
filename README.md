@@ -94,22 +94,6 @@ actions tied to the current ChatGPT user. Leave public content anonymous.
 - `npm test`: build the starter and verify its rendered loading skeleton
 - `npm run db:generate`: generate Drizzle migrations after schema changes
 
-## Production database safety
-
-The Worker calls `ensureDatabaseSchema()` before serving application routes.
-It checks the D1 schema, applies additive compatibility changes idempotently,
-and records the current version in `portal_schema_migrations`. This prevents a
-deployment from serving code that queries columns which have not reached D1.
-
-When adding a database migration:
-
-1. Generate and review the SQL migration in `drizzle/`.
-2. Add the corresponding additive compatibility change to
-   `db/ensure-schema.ts` and increment `REQUIRED_SCHEMA_VERSION`.
-3. Run `npm test` before publishing.
-4. Never place destructive changes (drop/rename/data deletion) in the runtime
-   compatibility migration; those require a backup and a supervised rollout.
-
 ## Learn More
 
 - [vinext Documentation](https://github.com/cloudflare/vinext)
