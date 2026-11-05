@@ -22,6 +22,13 @@
       "when": 1793836460150,
       "tag": "0002_foamy_living_lightning",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1793853193639,
+      "tag": "0003_volatile_inertia",
+      "breakpoints": true
     }
   ]
 }

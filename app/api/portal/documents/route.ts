@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { getDb } from "@/db";
 import { documents, fiscalPeriods, memberships } from "@/db/schema";
@@ -14,6 +14,11 @@ export async function GET(request: Request) {
     id: documents.id,
     title: documents.title,
     category: documents.category,
+    fiscalType: documents.fiscalType,
+    issueDate: documents.issueDate,
+    opinionSense: documents.opinionSense,
+    validUntil: documents.validUntil,
+    isCurrent: documents.isCurrent,
     mimeType: documents.mimeType,
     sizeBytes: documents.sizeBytes,
     publishedAt: documents.publishedAt,
@@ -21,7 +26,7 @@ export async function GET(request: Request) {
     periodMonth: fiscalPeriods.month,
   }).from(documents)
     .leftJoin(fiscalPeriods, eq(fiscalPeriods.id, documents.periodId))
-    .where(and(eq(documents.organizationId, membership.organizationId), eq(documents.status, "published")))
+    .where(and(eq(documents.organizationId, membership.organizationId), eq(documents.status, "published"), isNull(documents.deletedAt)))
     .orderBy(desc(documents.publishedAt));
   return NextResponse.json({ documents: rows });
 }

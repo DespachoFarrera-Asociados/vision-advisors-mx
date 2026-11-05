@@ -4,11 +4,12 @@ export const organizations = sqliteTable("organizations", {
   id: text("id").primaryKey(),
   legalName: text("legal_name").notNull(),
   tradeName: text("trade_name").notNull(),
+  rfc: text("rfc"),
   rfcCiphertext: text("rfc_ciphertext"),
   status: text("status", { enum: ["active", "suspended", "archived"] }).notNull().default("active"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
-});
+}, (table) => [uniqueIndex("organizations_rfc_unique").on(table.rfc)]);
 
 export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
@@ -95,6 +96,17 @@ export const documents = sqliteTable("documents", {
   periodId: text("period_id").references(() => fiscalPeriods.id, { onDelete: "set null" }),
   title: text("title").notNull(),
   category: text("category", { enum: ["report", "tax", "accounting", "legal", "other"] }).notNull().default("other"),
+  fiscalType: text("fiscal_type", { enum: ["general", "csf", "opinion", "acuse"] }).notNull().default("general"),
+  issueDate: text("issue_date"),
+  opinionSense: text("opinion_sense", { enum: ["positive", "negative", "no_obligations", "registered_no_obligations"] }),
+  validUntil: text("valid_until"),
+  isCurrent: integer("is_current", { mode: "boolean" }).notNull().default(true),
+  replacesId: text("replaces_id"),
+  sha256: text("sha256"),
+  detectedRfc: text("detected_rfc"),
+  rfcValidated: integer("rfc_validated", { mode: "boolean" }).notNull().default(false),
+  manualConfirmed: integer("manual_confirmed", { mode: "boolean" }).notNull().default(false),
+  deletedAt: text("deleted_at"),
   objectKey: text("object_key").notNull(),
   mimeType: text("mime_type").notNull(),
   sizeBytes: integer("size_bytes").notNull(),

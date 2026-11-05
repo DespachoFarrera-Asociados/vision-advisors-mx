@@ -13,9 +13,12 @@ type Organization = {
   id: string;
   legalName: string;
   tradeName: string;
+  rfc: string | null;
   status: string;
   members: number;
   periods: number;
+  csfStatus: string;
+  opinionStatus: string;
 };
 
 type Period = { id: string; organizationId: string; year: number; month: number; status: "draft" | "review" | "published" | "locked"; publishedAt: string | null; updatedAt: string };
@@ -41,6 +44,7 @@ type DocumentItem = {
   periodYear: number | null; periodMonth: number | null; title: string; category: string;
   mimeType: string; sizeBytes: number; status: "draft" | "published";
   publishedAt: string | null; createdAt: string;
+  fiscalType: "general" | "csf" | "opinion" | "acuse"; issueDate: string | null; opinionSense: string | null; validUntil: string | null; isCurrent: boolean; rfcValidated: boolean;
 };
 
 type Screen = "loading" | "anonymous" | "forbidden" | "ready" | "error";
@@ -220,7 +224,7 @@ export default function AdminPortal() {
     const response = await fetch("/api/admin/organizations", {
       method: "POST",
       headers: { authorization: `Bearer ${tokenRef.current}`, "content-type": "application/json" },
-      body: JSON.stringify({ legalName: form.get("legalName"), tradeName: form.get("tradeName") }),
+      body: JSON.stringify({ legalName: form.get("legalName"), tradeName: form.get("tradeName"), rfc: form.get("rfc") }),
     });
     const data = (await response.json()) as { id?: string; message?: string };
     if (!response.ok) setMessage(data.message || "No fue posible crear la empresa.");
@@ -229,6 +233,16 @@ export default function AdminPortal() {
       setMessage("Empresa registrada correctamente.");
       await loadOrganizations(tokenRef.current);
     }
+    setBusy(false);
+  }
+
+  async function updateOrganizationRfc(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setBusy(true); setMessage("");
+    const form = new FormData(event.currentTarget);
+    const response = await fetch("/api/admin/organizations", { method: "PATCH", headers: { authorization: `Bearer ${tokenRef.current}`, "content-type": "application/json" }, body: JSON.stringify({ id: form.get("id"), rfc: form.get("rfc") }) });
+    const data = (await response.json()) as { message?: string };
+    setMessage(data.message || "No fue posible actualizar el RFC.");
+    if (response.ok) await loadOrganizations(tokenRef.current);
     setBusy(false);
   }
 
@@ -346,9 +360,9 @@ export default function AdminPortal() {
             <div className="admin-panel-title"><div><small>DIRECTORIO</small><h2>Empresas registradas</h2></div><strong>{organizations.length}</strong></div>
             <div className="admin-table">
               {organizations.map((organization) => <div className="admin-row" key={organization.id}>
-                <span><b>{organization.tradeName}</b><small>{organization.legalName}</small></span>
-                <span><small>CLIENTES</small><b>{organization.members}</b></span>
-                <span><small>PERIODOS</small><b>{organization.periods}</b></span>
+                <span><b>{organization.tradeName}</b><small>{organization.legalName}</small>{organization.rfc ? <small>RFC · {organization.rfc}</small> : <form className="rfc-inline" onSubmit={updateOrganizationRfc}><input type="hidden" name="id" value={organization.id}/><input name="rfc" required maxLength={13} placeholder="Capturar RFC"/><button disabled={busy}>Guardar</button></form>}</span>
+                <span><small>CSF</small><b className="fiscal-state">{organization.csfStatus}</b></span>
+                <span><small>OPINIÓN</small><b className={`fiscal-state ${organization.opinionStatus === "Negativa" || organization.opinionStatus === "Vencida" ? "attention" : ""}`}>{organization.opinionStatus}</b></span>
                 <i>{organization.status === "active" ? "Activa" : organization.status}</i>
               </div>)}
               {!organizations.length && <p className="admin-empty">Todavía no hay empresas registradas.</p>}
@@ -359,7 +373,8 @@ export default function AdminPortal() {
             <small>NUEVO EXPEDIENTE</small><h2>Registrar empresa</h2>
             <label>Nombre comercial<input name="tradeName" required maxLength={120} placeholder="Ej. Clínica del Sureste"/></label>
             <label>Razón social<input name="legalName" required maxLength={180} placeholder="Nombre legal completo"/></label>
-            <p>El RFC y las credenciales se incorporarán en la etapa segura de asignación del cliente.</p>
+            <label>RFC<input name="rfc" required minLength={12} maxLength={13} placeholder="ABC010203AB1" autoCapitalize="characters"/></label>
+            <p>El RFC se usa para validar que cada documento fiscal corresponda a esta empresa.</p>
             <button disabled={busy}>{busy ? "Procesando…" : "Crear expediente"}</button>
           </form>
         </section>
@@ -408,7 +423,11 @@ export default function AdminPortal() {
             <label>Empresa<select name="organizationId" required value={selectedOrganization} onChange={(event) => setSelectedOrganization(event.target.value)}><option value="">Seleccione…</option>{organizations.map((organization) => <option key={organization.id} value={organization.id}>{organization.tradeName}</option>)}</select></label>
             <label>Periodo opcional<select name="periodId" defaultValue=""><option value="">Sin periodo</option>{periods.map((period) => <option key={period.id} value={period.id}>{months[period.month - 1]} {period.year}</option>)}</select></label>
             <label>Categoría<select name="category" defaultValue="report"><option value="report">Reporte</option><option value="tax">Fiscal</option><option value="accounting">Contable</option><option value="legal">Legal</option><option value="other">Otro</option></select></label>
+            <label>Tipo fiscal<select name="fiscalType" defaultValue="general"><option value="general">Documento general</option><option value="csf">Constancia de Situación Fiscal</option><option value="opinion">Opinión de cumplimiento</option><option value="acuse">Acuse o declaración</option></select></label>
+            <label>Fecha de emisión<input name="issueDate" type="date"/></label>
+            <label>Sentido de opinión<select name="opinionSense" defaultValue=""><option value="">No aplica</option><option value="positive">Positiva</option><option value="negative">Negativa</option><option value="no_obligations">Sin obligaciones</option><option value="registered_no_obligations">Inscrito sin obligaciones</option></select></label>
             <label className="document-file">Archivo<input name="file" type="file" required accept=".pdf,.xlsx,.docx,.csv"/></label>
+            <label className="document-confirm"><input name="manualConfirmed" type="checkbox"/> Confirmo que el archivo pertenece al RFC seleccionado cuando el PDF no permita leerlo.</label>
             <button disabled={busy}>{busy ? "Procesando…" : "Cargar borrador"}</button>
           </form>
           <div className="document-list">

@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { documents, memberships } from "@/db/schema";
+import { auditEvents, documents, memberships } from "@/db/schema";
 import { getPortalUser } from "@/lib/portal-auth";
 import { acceptedDocumentTypes, getPrivateBucket, safeDownloadName } from "@/lib/private-files";
 
@@ -10,7 +10,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const { id } = await params;
   const db = getDb();
   const [document] = await db.select().from(documents).where(eq(documents.id, id)).limit(1);
-  if (!document) return Response.json({ message: "Documento no encontrado." }, { status: 404 });
+  if (!document || document.deletedAt) return Response.json({ message: "Documento no encontrado." }, { status: 404 });
   const isStaff = ["admin", "advisor"].includes(user.platformRole);
   if (!isStaff) {
     const [membership] = await db.select({ id: memberships.id }).from(memberships).where(and(eq(memberships.userId, user.id), eq(memberships.organizationId, document.organizationId))).limit(1);
@@ -20,6 +20,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   if (!object) return Response.json({ message: "El archivo no está disponible en el almacenamiento." }, { status: 404 });
   const extension = acceptedDocumentTypes.get(document.mimeType) || "bin";
   const fileName = safeDownloadName(document.title, extension);
+  await db.insert(auditEvents).values({ id: `aud_${crypto.randomUUID()}`, actorUserId: user.id, organizationId: document.organizationId, action: "document.downloaded", entityType: "document", entityId: document.id, createdAt: new Date().toISOString() });
   return new Response(object.body, { headers: {
     "content-type": document.mimeType,
     "content-length": String(object.size),
