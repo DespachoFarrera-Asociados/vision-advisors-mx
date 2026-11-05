@@ -70,6 +70,22 @@ export default function AdminPortal() {
   const [batchRows, setBatchRows] = useState<BatchRow[]>([]);
   const [notices, setNotices] = useState<Notice[]>([]);
 
+  const verifySchema = useCallback(async (token: string) => {
+    const response = await fetch("/api/admin/schema-health", {
+      headers: { authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+    if (response.status === 403) {
+      setScreen("forbidden");
+      return false;
+    }
+    if (!response.ok) {
+      const data = (await response.json().catch(() => ({}))) as { message?: string };
+      throw new Error(data.message || "No fue posible verificar la estructura de la base D1.");
+    }
+    return true;
+  }, []);
+
   const loadOrganizations = useCallback(async (token: string, markReady = true) => {
     const response = await fetch("/api/admin/organizations", {
       headers: { authorization: `Bearer ${token}` },
@@ -146,6 +162,8 @@ export default function AdminPortal() {
         setUser(await client.getUser());
         const token = await client.getTokenSilently();
         tokenRef.current = token;
+        const schemaReady = await verifySchema(token);
+        if (!schemaReady || !active) return;
         const authorized = await loadOrganizations(token, false);
         if (!authorized || !active) return;
         await loadClients();
@@ -160,7 +178,7 @@ export default function AdminPortal() {
     }
     void initialize();
     return () => { active = false; };
-  }, [loadClients, loadDocuments, loadNotices, loadOrganizations]);
+  }, [loadClients, loadDocuments, loadNotices, loadOrganizations, verifySchema]);
 
   async function uploadDocument(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setMessage("");
