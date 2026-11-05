@@ -36,6 +36,7 @@ type PortalData = {
 type PortalDocument = { id: string; title: string; category: string; fiscalType: "general" | "csf" | "opinion" | "acuse"; issueDate: string | null; opinionSense: string | null; validUntil: string | null; isCurrent: boolean; mimeType: string; sizeBytes: number; periodYear: number | null; periodMonth: number | null; publishedAt: string | null };
 type HistoryPeriod = { id: string; year: number; month: number; publishedAt: string | null; snapshot: PortalData["snapshot"]; taxes: { taxType: string; amountCents: number; status: string; dueDate: string | null }[]; observations: { title: string; detail: string }[]; documentCount: number; generalDocumentCount: number };
 type PortalMessage = { id: string; subject: string; body: string; type: "informative" | "action" | "urgent"; dueDate: string | null; documentId: string | null; readAt: string | null; createdAt: string };
+type PortalBootstrap = { summary: PortalData; documents: { documents: PortalDocument[] }; history: { periods: HistoryPeriod[] }; messages: { messages: PortalMessage[] } };
 
 async function fetchProtected(url: string, accessToken: string) {
   let response: Response | undefined;
@@ -99,23 +100,16 @@ export default function ClientPortal() {
           setUser(await client.getUser());
           const accessToken = await client.getTokenSilently();
           tokenRef.current = accessToken;
-          // Auth0 can throttle simultaneous /userinfo validations for the same
-          // token. Load each protected resource in sequence so all three APIs
-          // resolve the same portal identity reliably.
-          const portalResponse = await fetchProtected("/api/portal/summary", accessToken);
-          if (portalResponse.ok || portalResponse.status === 503) {
-            setPortalData((await portalResponse.json()) as PortalData);
-          }
-          const documentResponse = await fetchProtected("/api/portal/documents", accessToken);
-          if (documentResponse.ok) setDocuments(((await documentResponse.json()) as { documents: PortalDocument[] }).documents);
-          const historyResponse = await fetchProtected("/api/portal/history", accessToken);
-          if (historyResponse.ok) {
-            const periodRows = ((await historyResponse.json()) as { periods: HistoryPeriod[] }).periods;
-            setHistory(periodRows);
-            setAccountingPeriodId(periodRows[0]?.id || "");
-          }
-          const messageResponse = await fetchProtected("/api/portal/messages", accessToken);
-          if (messageResponse.ok) setMessages(((await messageResponse.json()) as { messages: PortalMessage[] }).messages);
+          // Load the private workspace through one server request. This avoids
+          // repeating Auth0 validation for summary, files, history and notices.
+          const bootstrapResponse = await fetchProtected("/api/portal/bootstrap", accessToken);
+          if (!bootstrapResponse.ok) throw new Error("No fue posible cargar el espacio privado.");
+          const bootstrap = (await bootstrapResponse.json()) as PortalBootstrap;
+          setPortalData(bootstrap.summary);
+          setDocuments(bootstrap.documents.documents);
+          setMessages(bootstrap.messages.messages);
+          setHistory(bootstrap.history.periods);
+          setAccountingPeriodId(bootstrap.history.periods[0]?.id || "");
           setState("authenticated");
         } else {
           setState("anonymous");
@@ -130,6 +124,20 @@ export default function ClientPortal() {
     void initializeAuth().finally(() => window.clearTimeout(watchdog));
     return () => { active = false; window.clearTimeout(watchdog); };
   }, []);
+
+  useEffect(() => {
+    if (state !== "authenticated") return;
+    let active = true;
+    async function refreshMessages() {
+      if (!tokenRef.current) return;
+      const response = await fetchProtected("/api/portal/messages", tokenRef.current);
+      if (active && response.ok) setMessages(((await response.json()) as { messages: PortalMessage[] }).messages);
+    }
+    const interval = window.setInterval(() => void refreshMessages(), 60_000);
+    const onFocus = () => void refreshMessages();
+    window.addEventListener("focus", onFocus);
+    return () => { active = false; window.clearInterval(interval); window.removeEventListener("focus", onFocus); };
+  }, [state]);
 
   async function signIn() {
     setState("loading");
@@ -187,6 +195,7 @@ export default function ClientPortal() {
   }
 
   const displayName = user?.name || user?.nickname || user?.email || "Cliente";
+  const unreadMessageCount = messages.filter((item) => !item.readAt).length;
   const isReady = portalData?.status === "ready" && portalData.snapshot;
   const portalMessage = portalData?.message || "El despacho está validando la asignación segura de su expediente.";
   const companyName = portalData?.organization?.tradeName || portalData?.organization?.legalName;
@@ -212,7 +221,7 @@ export default function ClientPortal() {
   return <main className="secure-shell">
     <aside className={`secure-sidebar${menuOpen ? " open" : ""}`}><Brand/><nav><span>PORTAL DEL CLIENTE</span><a className="active" href="#resumen" onClick={() => setMenuOpen(false)}>Resumen</a><a href="#fiscal" onClick={() => setMenuOpen(false)}>Fiscal y contable</a><a href="#documentos" onClick={() => setMenuOpen(false)}>Documentos fiscales</a><a href="#mensajes" onClick={() => setMenuOpen(false)}>Mensajes {messages.some((item) => !item.readAt) ? `(${messages.filter((item) => !item.readAt).length})` : ""}</a><a href="#historial" onClick={() => setMenuOpen(false)}>Historial</a><span>CUENTA</span><a className="disabled" aria-disabled="true">Mi cuenta · Próximamente</a></nav><button onClick={signOut}>Cerrar sesión</button></aside>
     <section className="secure-workspace">
-      <header><button className="portal-menu" type="button" aria-label="Abrir menú" onClick={() => setMenuOpen((value) => !value)}>☰</button><p>Portal Vision / <b>Resumen</b></p><div><small>SESIÓN PROTEGIDA</small><b>{companyName || displayName}</b></div><span>{displayName.slice(0, 2).toUpperCase()}</span></header>
+      <header><button className="portal-menu" type="button" aria-label="Abrir menú" onClick={() => setMenuOpen((value) => !value)}>☰</button><p>Portal Vision / <b>Resumen</b></p><a className="notification-bell" href="#mensajes" aria-label={`${unreadMessageCount} mensajes nuevos`} title="Mensajes del despacho"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>{unreadMessageCount > 0 && <span>{unreadMessageCount}</span>}</a><div><small>SESIÓN PROTEGIDA</small><b>{companyName || displayName}</b></div><span>{displayName.slice(0, 2).toUpperCase()}</span></header>
       <div className="secure-content" id="resumen"><p className="auth-kicker">{isReady ? `PERIODO ${monthName(portalData.period?.month).toUpperCase()} ${portalData.period?.year}` : "PORTAL VISION"}</p><h1>{companyName ? `Hola, ${companyName}` : "Bienvenido a su espacio privado."}</h1><p>{isReady ? alignPeriodSummary(portalData.snapshot?.executiveSummary || "", portalData.period?.year, portalData.period?.month) : portalMessage}</p><article className={`secure-notice${opinionNegative ? " bad" : opinionExpired ? " warn" : ""}`}><i>{opinionNegative ? "!" : opinionExpired ? "⌛" : "✓"}</i><div><h2>{fiscalStatusTitle}</h2><p>{fiscalStatusCopy}</p></div></article><section className="secure-status"><div><small>INGRESOS FACTURADOS</small><b>{isReady ? formatMoney(portalData.snapshot!.incomeMonthCents) : "—"}</b><span>Información del periodo publicado</span></div><div><small>GASTOS DEDUCIBLES</small><b>{isReady ? formatMoney(portalData.snapshot!.deductionsMonthCents) : "—"}</b><span>Comprobantes revisados</span></div><div><small>UTILIDAD ESTIMADA</small><b>{isReady ? formatMoney(displayedResult) : "—"}</b><span>{isReady && portalData.snapshot!.incomeMonthCents ? `Margen ${((displayedResult / portalData.snapshot!.incomeMonthCents) * 100).toFixed(1)}%` : "Pendiente"}</span></div><div className="highlight"><small>IMPUESTOS ESTIMADOS</small><b>{isReady ? formatMoney(taxTotal) : "—"}</b><span>ISR, IVA y contribuciones</span></div></section>{!isReady && <a className="demo-link" href="/portal-demo">Ver demostración con datos ficticios →</a>}
         <section className="portal-accounting" id="fiscal"><div className="accounting-heading"><div><p className="auth-kicker">FISCAL Y CONTABLE</p><h2>Mi contabilidad</h2><span>Consulte las cifras, contribuciones y documentos publicados por el despacho.</span></div><label>Periodo contable<select value={accountingPeriod?.id || ""} onChange={(event) => setAccountingPeriodId(event.target.value)} disabled={!history.length}>{history.map((period) => <option key={period.id} value={period.id}>{monthName(period.month)} {period.year}</option>)}</select></label></div>{accountingPeriod?.snapshot ? <><div className="accounting-kpis"><article><small>INGRESOS DEL MES</small><b>{formatMoney(accountingPeriod.snapshot.incomeMonthCents)}</b><span>{variationLabel(accountingPeriod.snapshot.incomeMonthCents, previousAccountingPeriod?.snapshot?.incomeMonthCents)}</span></article><article><small>GASTOS DEDUCIBLES</small><b>{formatMoney(accountingPeriod.snapshot.deductionsMonthCents)}</b><span className="expense-variation">{variationLabel(accountingPeriod.snapshot.deductionsMonthCents, previousAccountingPeriod?.snapshot?.deductionsMonthCents)}</span></article><article><small>UTILIDAD CALCULADA</small><b>{formatMoney(accountingResult)}</b><span>Ingresos menos gastos deducibles</span></article><article className="highlight"><small>CONTRIBUCIONES ESTIMADAS</small><b>{formatMoney(accountingTaxTotal)}</b><span>{filingStatusLabel(accountingPeriod.snapshot.filingStatus)}</span></article></div><div className="accounting-grid"><article className="tax-breakdown"><div><small>DESGLOSE DEL PERIODO</small><h3>Impuestos y contribuciones</h3></div>{accountingPeriod.taxes?.map((tax) => <div className="tax-row" key={tax.taxType}><span><b>{tax.taxType}</b><small>{taxStatus(tax.status)}{tax.dueDate ? ` · vence ${formatShortDate(tax.dueDate)}` : ""}</small></span><strong>{formatMoney(tax.amountCents)}</strong></div>)}{!accountingPeriod.taxes?.length && <p>El despacho todavía no ha publicado un desglose de contribuciones para este periodo.</p>}<div className="tax-total"><span>Total estimado</span><b>{formatMoney(accountingTaxTotal)}</b></div></article><article className="accounting-reading"><small>LECTURA EJECUTIVA</small><h3>{accountingPeriod.snapshot.healthLabel || "Información del periodo"}</h3><p>{alignPeriodSummary(accountingPeriod.snapshot.executiveSummary || "", accountingPeriod.year, accountingPeriod.month)}</p><div className="accounting-facts"><span><b>{accountingPeriod.snapshot.issuedCfdiCount || 0}</b> CFDI emitidos</span><span><b>{accountingPeriod.snapshot.receivedCfdiCount || 0}</b> CFDI recibidos</span><span><b>{accountingPeriod.snapshot.paymentDueDate ? formatShortDate(accountingPeriod.snapshot.paymentDueDate) : "Pendiente"}</b> Fecha límite</span></div>{accountingPeriod.observations.map((observation) => <div key={`${accountingPeriod.id}-${observation.title}`}><b>{observation.title}</b><span>{observation.detail}</span></div>)}</article></div><div className="accounting-files"><div><small>DECLARACIONES Y ACUSES</small><h3>Documentos del periodo</h3></div>{accountingDocuments.map((item) => <article key={item.id}><span><b>{item.title}</b><small>{documentCategory(item.category)} · {formatBytes(item.sizeBytes)}</small></span><button type="button" onClick={() => void downloadDocument(item)}>Descargar ↓</button></article>)}{!accountingDocuments.length && <p>No hay declaraciones o acuses asociados a este periodo.</p>}</div></> : <p className="accounting-empty">Todavía no hay periodos contables publicados.</p>}</section>
         {accountingPeriod?.snapshot && <AccountingReconciliation period={accountingPeriod} result={accountingResult} resultReconciled={resultReconciled} vatDue={vatDue} vatReconciled={vatReconciled} deadline={declarationDeadline}/>}
