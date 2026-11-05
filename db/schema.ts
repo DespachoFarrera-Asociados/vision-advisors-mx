@@ -128,3 +128,16 @@ export const auditEvents = sqliteTable("audit_events", {
   ipHash: text("ip_hash"),
   createdAt: text("created_at").notNull(),
 });
+
+export const messages = sqliteTable("messages", {
+  id: text("id").primaryKey(),
+  organizationId: text("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+  subject: text("subject").notNull(),
+  body: text("body").notNull(),
+  type: text("type", { enum: ["informative", "action", "urgent"] }).notNull().default("informative"),
+  dueDate: text("due_date"),
+  documentId: text("document_id").references(() => documents.id, { onDelete: "set null" }),
+  readAt: text("read_at"),
+  sentBy: text("sent_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: text("created_at").notNull(),
+});

@@ -49,6 +49,7 @@ type DocumentItem = {
 
 type Screen = "loading" | "anonymous" | "forbidden" | "ready" | "error";
 type BatchRow = { file: File; rfc: string | null; organization: Organization | null; result?: string; ok?: boolean };
+type Notice = { id: string; organizationId: string; organizationName: string; subject: string; body: string; type: "informative" | "action" | "urgent"; dueDate: string | null; documentId: string | null; readAt: string | null; createdAt: string };
 
 export default function AdminPortal() {
   const authRef = useRef<Auth0Client | null>(null);
@@ -67,6 +68,7 @@ export default function AdminPortal() {
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [batchRows, setBatchRows] = useState<BatchRow[]>([]);
+  const [notices, setNotices] = useState<Notice[]>([]);
 
   const loadOrganizations = useCallback(async (token: string, markReady = true) => {
     const response = await fetch("/api/admin/organizations", {
@@ -110,6 +112,7 @@ export default function AdminPortal() {
     if (!response.ok) throw new Error("No fue posible consultar los documentos.");
     setDocuments(((await response.json()) as { documents: DocumentItem[] }).documents);
   }, []);
+  const loadNotices = useCallback(async () => { if (!tokenRef.current) return; const response = await fetch("/api/admin/messages", { headers: { authorization: `Bearer ${tokenRef.current}` }, cache: "no-store" }); if (response.ok) setNotices(((await response.json()) as { messages: Notice[] }).messages); }, []);
 
   const loadPeriodDetail = useCallback(async (periodId: string) => {
     if (!periodId || !tokenRef.current) { setPeriodDetail(undefined); return; }
@@ -147,6 +150,7 @@ export default function AdminPortal() {
         if (!authorized || !active) return;
         await loadClients();
         await loadDocuments();
+        await loadNotices();
         if (active) setScreen("ready");
       } catch (error) {
         if (!active) return;
@@ -156,7 +160,7 @@ export default function AdminPortal() {
     }
     void initialize();
     return () => { active = false; };
-  }, [loadClients, loadDocuments, loadOrganizations]);
+  }, [loadClients, loadDocuments, loadNotices, loadOrganizations]);
 
   async function uploadDocument(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setMessage("");
@@ -200,6 +204,12 @@ export default function AdminPortal() {
     }
     setBatchRows(results); await loadDocuments();
     setMessage(`Lote procesado: ${results.filter((item) => item.ok).length} guardados, ${results.filter((item) => !item.ok).length} con error.`); setBusy(false);
+  }
+
+  async function sendNotice(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setBusy(true); setMessage(""); const formElement = event.currentTarget; const form = new FormData(formElement);
+    const response = await fetch("/api/admin/messages", { method: "POST", headers: { authorization: `Bearer ${tokenRef.current}`, "content-type": "application/json" }, body: JSON.stringify({ organizationId: form.get("organizationId"), subject: form.get("subject"), body: form.get("body"), type: form.get("type"), dueDate: form.get("dueDate") || null, documentId: form.get("documentId") || null }) });
+    const data = (await response.json()) as { message?: string }; setMessage(data.message || "No fue posible enviar el aviso."); if (response.ok) { formElement.reset(); await loadNotices(); } setBusy(false);
   }
 
   async function setDocumentStatus(id: string, status: "draft" | "published") {
@@ -376,11 +386,13 @@ export default function AdminPortal() {
   if (screen === "forbidden") return <Gate title="Acceso restringido" copy="Su sesión es válida, pero esta cuenta no tiene permisos administrativos." action="Cerrar sesión" onAction={signOut}/>;
   if (screen === "error") return <Gate title="Panel no disponible" copy={message} action="Volver al sitio" href="/"/>;
 
+  const fiscalAlerts = organizations.filter((item) => ["Negativa", "Vencida", "Sin cargar"].includes(item.opinionStatus) || item.csfStatus === "Sin cargar");
+
   return <main className="admin-shell">
     <aside className={`admin-sidebar${menuOpen ? " open" : ""}`}>
       <Brand/>
       <p>PANEL DEL DESPACHO</p>
-      <nav><a className="active" href="#clientes" onClick={() => setMenuOpen(false)}>Clientes</a><a href="#documentos" onClick={() => setMenuOpen(false)}>Cargar documentos</a><a href="#periodos" onClick={() => setMenuOpen(false)}>Publicar periodo</a><a href="#empresas" onClick={() => setMenuOpen(false)}>Empresas</a></nav>
+      <nav><a className="active" href="#clientes" onClick={() => setMenuOpen(false)}>Clientes</a><a href="#documentos" onClick={() => setMenuOpen(false)}>Cargar documentos</a><a href="#periodos" onClick={() => setMenuOpen(false)}>Publicar periodo</a><a href="#avisos" onClick={() => setMenuOpen(false)}>Enviar aviso</a><a href="#empresas" onClick={() => setMenuOpen(false)}>Empresas</a></nav>
       <button onClick={signOut}>Cerrar sesión</button>
     </aside>
     <section className="admin-workspace">
@@ -389,6 +401,7 @@ export default function AdminPortal() {
         <p className="admin-kicker">PANEL DEL DESPACHO</p>
         <h1>Clientes y operación.</h1>
         <p className="admin-lead">Administre expedientes, documentos y periodos publicados desde un solo lugar.</p>
+        {fiscalAlerts.length > 0 && <div className="fiscal-alerts"><b>{fiscalAlerts.length} expediente{fiscalAlerts.length === 1 ? "" : "s"} requieren seguimiento fiscal</b><span>{fiscalAlerts.slice(0, 4).map((item) => `${item.tradeName}: CSF ${item.csfStatus.toLowerCase()}, opinión ${item.opinionStatus.toLowerCase()}`).join(" · ")}</span></div>}
         {message && <div className="admin-message" role="status">{message}</div>}
 
         <section className="admin-grid" id="empresas">
@@ -472,6 +485,7 @@ export default function AdminPortal() {
             {!documents.length && <p className="admin-empty">Todavía no hay documentos cargados.</p>}
           </div>
         </section>
+        <section className="notice-admin" id="avisos"><div className="document-heading"><div><small>COMUNICACIÓN SEGURA</small><h2>Enviar aviso</h2><p>El mensaje aparecerá en la bandeja privada del cliente.</p></div><strong>{notices.filter((item) => !item.readAt).length}</strong></div><form className="notice-form" onSubmit={sendNotice}><label>Empresa<select name="organizationId" required defaultValue=""><option value="">Seleccione…</option>{organizations.map((organization) => <option key={organization.id} value={organization.id}>{organization.tradeName}</option>)}</select></label><label>Tipo<select name="type" defaultValue="informative"><option value="informative">Informativo</option><option value="action">Acción requerida</option><option value="urgent">Urgente</option></select></label><label>Fecha límite<input name="dueDate" type="date"/></label><label>Documento opcional<select name="documentId" defaultValue=""><option value="">Sin adjunto</option>{documents.filter((item) => item.status === "published").map((item) => <option key={item.id} value={item.id}>{item.organizationName} · {item.title}</option>)}</select></label><label className="notice-subject">Asunto<input name="subject" required maxLength={180}/></label><label className="notice-body">Mensaje<textarea name="body" required maxLength={3000} rows={5}/></label><button disabled={busy}>{busy ? "Enviando…" : "Enviar al portal"}</button></form><div className="notice-history">{notices.slice(0, 10).map((item) => <article key={item.id}><span><b>{item.subject}</b><small>{item.organizationName} · {item.type === "urgent" ? "Urgente" : item.type === "action" ? "Acción requerida" : "Informativo"}</small></span><i>{item.readAt ? "Leído" : "Pendiente"}</i></article>)}{!notices.length && <p>No se han enviado avisos.</p>}</div></section>
       </div>
     </section>
   </main>;
